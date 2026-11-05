@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "image": "sprites/projectiles.png",
+  "width": 128,
+  "height": 29,
+  "frames": [
+    {"name": "grenade_bullet", "rect": [1, 1, 27, 27], "pivot": [0.5, 1.0]},
+    {"name": "grenade_bullet_blue", "rect": [29, 1, 25, 25], "pivot": [0.5, 1.0]},
+    {"name": "grenade_bullet_orange", "rect": [55, 1, 25, 25], "pivot": [0.5, 1.0]}
+  ]
+}

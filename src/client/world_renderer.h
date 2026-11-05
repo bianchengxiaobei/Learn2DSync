@@ -195,6 +195,7 @@ private:
     void load_bag_atlas(const shared::ResourceManager& resources);
     void load_health_bar_atlas(const shared::ResourceManager& resources);
     void load_particle_atlas(const shared::ResourceManager& resources);
+    void load_projectile_atlas(const shared::ResourceManager& resources);
     void spawn_particles(
         std::span<const ParticleLayer> layers,
         float x,
@@ -224,6 +225,9 @@ private:
     bgfx::TextureHandle original_texture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle map_art_texture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle particle_texture_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle projectile_texture_ = BGFX_INVALID_HANDLE;
+    core::Atlas projectile_atlas_;
+    bool projectile_atlas_ready_ = false;
     std::string map_art_id_;
     std::vector<MapArtLayer> map_art_layers_;
     bool map_art_ready_ = false;

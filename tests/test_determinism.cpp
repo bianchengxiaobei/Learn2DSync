@@ -2182,10 +2182,179 @@ void test_grenade_bounce_policy() {
     CHECK(removed);
 }
 
+void test_grenade_platform_edge() {
+    using namespace nsync::core;
+    Map map;
+    map.id = "grenade_platform_edge_test";
+    map.bounds = AABB{
+        Vec2{Fix32::from_int(-6), Fix32::zero()},
+        Vec2{Fix32::from_int(6), Fix32::from_int(16)}};
+    map.solids = {AABB{
+        Vec2{Fix32::from_int(-6), Fix32::from_int(12)},
+        Vec2{Fix32::from_int(6), Fix32::from_int(14)}}};
+    map.one_way_platforms = {AABB{
+        Vec2{Fix32::from_int(-1), Fix32::from_int(6)},
+        Vec2{Fix32::from_int(1), Fix32::from_ratio(63, 10)}}};
+    map.platform_hatchway = {1};
+    map.spawns.fill(Vec2{Fix32::zero(), Fix32::from_int(2)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 1);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    CHECK(shooter != nullptr);
+    if (shooter == nullptr) {
+        return;
+    }
+    shooter->position =
+        Vec2{Fix32::from_ratio(861, 1000), Fix32::from_int(2)};
+    shooter->velocity = {};
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 0;
+    command.command.aim_y = 32767;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+    Fix32 spawn_x{};
+    world.projectiles().for_each([&](const Projectile& projectile) {
+        spawn_x = projectile.position.x;
+    });
+    CHECK(spawn_x > Fix32::one());
+    CHECK(spawn_x < Fix32::from_ratio(12, 10));
+
+    const Fix32 platform_bottom = Fix32::from_ratio(63, 10);
+    bool stayed_above = true;
+    InputFrame empty;
+    for (int tick = 0; tick < 90 && !world.projectiles().empty(); ++tick) {
+        world.step(empty);
+        world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.position.y > platform_bottom) {
+                stayed_above = false;
+            }
+        });
+    }
+    CHECK(stayed_above);
+}
+
+void test_grenade_upward_shot() {
+    using namespace nsync::core;
+    Map map;
+    map.id = "grenade_upward_test";
+    map.bounds = AABB{
+        Vec2{Fix32::from_int(-8), Fix32::zero()},
+        Vec2{Fix32::from_int(8), Fix32::from_int(24)}};
+    map.spawns.fill(Vec2{Fix32::zero(), Fix32::from_int(12)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 1);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    CHECK(shooter != nullptr);
+    if (shooter == nullptr) {
+        return;
+    }
+    shooter->position = Vec2{Fix32::zero(), Fix32::from_int(12)};
+    shooter->velocity = {};
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 0;
+    command.command.aim_y = -32767;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+
+    Fix32 highest = Fix32::from_int(24);
+    bool rose = false;
+    InputFrame empty;
+    for (int tick = 0; tick < 90 && !world.projectiles().empty(); ++tick) {
+        world.step(empty);
+        world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.velocity.y < Fix32::zero() &&
+                projectile.position.y < Fix32::from_int(12)) {
+                rose = true;
+            }
+            if (projectile.position.y < highest) {
+                highest = projectile.position.y;
+            }
+        });
+    }
+    CHECK(rose);
+    CHECK(highest < Fix32::from_int(8));
+    CHECK(world.projectiles().empty());
+}
+
+void test_grenade_flight_speed() {
+    using namespace nsync::core;
+    Map map;
+    map.id = "grenade_speed_test";
+    map.bounds = AABB{
+        Vec2{Fix32::from_int(-10), Fix32::zero()},
+        Vec2{Fix32::from_int(30), Fix32::from_int(24)}};
+    map.spawns.fill(Vec2{Fix32::zero(), Fix32::from_int(12)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 1);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    CHECK(shooter != nullptr);
+    if (shooter == nullptr) {
+        return;
+    }
+    shooter->position = Vec2{Fix32::zero(), Fix32::from_int(12)};
+    shooter->velocity = {};
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 32767;
+    command.command.aim_y = 0;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+    Fix32 start_x{};
+    world.projectiles().for_each([&](const Projectile& projectile) {
+        start_x = projectile.position.x;
+    });
+
+    InputFrame empty;
+    for (int tick = 0; tick < 60; ++tick) {
+        world.step(empty);
+    }
+    Fix32 end_x = start_x;
+    world.projectiles().for_each([&](const Projectile& projectile) {
+        end_x = projectile.position.x;
+    });
+    const Fix32 travelled = end_x - start_x;
+    CHECK(travelled > Fix32::from_ratio(119, 10));
+    CHECK(travelled < Fix32::from_ratio(121, 10));
+}
+
 void test_original_shell_rules() {
     using namespace nsync::core;
-    const auto rifle_damage_at = [](Fix32 victim_x) {
-        Map map;
+    const auto rifle_damage_at = [](Fix32 victim_x) {        Map map;
         map.id = "range_test";
         map.bounds = AABB{
             Vec2{Fix32::from_int(-30), Fix32::zero()},
@@ -2354,6 +2523,9 @@ bool run_determinism_tests(const std::filesystem::path& root) {
     test_warmup_and_reload();
     test_explosion_and_bounce();
     test_grenade_bounce_policy();
+    test_grenade_platform_edge();
+    test_grenade_upward_shot();
+    test_grenade_flight_speed();
     test_original_shell_rules();
     test_objective_mode();
     test_crystal_mode();

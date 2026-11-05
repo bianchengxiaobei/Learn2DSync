@@ -665,6 +665,15 @@ void test_sprite_pipeline() {
         CHECK(idle_frame->pivot_y == Fix32::one());
     }
 
+    Atlas projectiles;
+    CHECK(projectiles.load_file(
+        root / "sprites" / "projectiles.atlas.json",
+        &error));
+    CHECK(error.empty());
+    CHECK(projectiles.find("grenade_bullet") != nullptr);
+    CHECK(projectiles.find("grenade_bullet_blue") != nullptr);
+    CHECK(projectiles.find("grenade_bullet_orange") != nullptr);
+
     AnimationSet animations;
     CHECK(animations.load_file(
         root / "data" / "animations.json",

@@ -1485,7 +1485,7 @@ void World::update_projectiles() {
         const bool floor_only = grenade_like || laser_like;
         const bool infinite_floor = projectile.terrain_bounces == 255;
         const Fix32 bounce_restore = grenade_like
-            ? Fix32::from_ratio(95, 100)
+            ? Fix32::from_ratio(1, 2)
             : (laser_like ? Fix32::from_ratio(9, 10)
                           : Fix32::from_ratio(3, 4));
         const Fix32 floor_threshold = projectile.normal_velocity >
@@ -1556,17 +1556,24 @@ void World::update_projectiles() {
             Fix32::from_raw(std::numeric_limits<std::int32_t>::max());
         bool found = false;
         const AABB* impact_box = nullptr;
+        Fix32 impact_padding = Fix32::zero();
         EntityId impact_player = EntityId::none();
         Vec2 impact_start = previous;
         Vec2 impact_end = projectile.position;
         Fix32 impact_distance = Fix32::zero();
 
-        const auto trace = [&](const Segment& path) {
-            for (const AABB& solid : collision_solids_) {
+        const auto trace = [&](const Segment& path, Fix32 padding) {
+            const auto hit_box = [&](const AABB& solid, Fix32 pad) {
+                AABB box = pad > Fix32::zero() ? solid.expanded(pad) : solid;
+                if (pad > Fix32::zero() && box.contains(path.a) &&
+                    !solid.contains(path.a)) {
+                    box = solid;
+                    pad = Fix32::zero();
+                }
                 Fix32 t_min{};
                 Fix32 t_max{};
-                if (!segment_intersects_aabb(path, solid, t_min, t_max)) {
-                    continue;
+                if (!segment_intersects_aabb(path, box, t_min, t_max)) {
+                    return;
                 }
                 const Fix32 t = Fix32::min(
                     Fix32::max(t_min, Fix32::zero()),
@@ -1575,8 +1582,12 @@ void World::update_projectiles() {
                     found = true;
                     impact_t = t;
                     impact_box = &solid;
+                    impact_padding = pad;
                     impact_player = EntityId::none();
                 }
+            };
+            for (const AABB& solid : collision_solids_) {
+                hit_box(solid, padding);
             }
             if (projectile.platform_puncher == 0) {
                 for (std::size_t index = 0;
@@ -1588,22 +1599,7 @@ void World::update_projectiles() {
                     if (!hatchway) {
                         continue;
                     }
-                    const AABB& platform = map_.one_way_platforms[index];
-                    Fix32 t_min{};
-                    Fix32 t_max{};
-                    if (!segment_intersects_aabb(
-                            path, platform, t_min, t_max)) {
-                        continue;
-                    }
-                    const Fix32 t = Fix32::min(
-                        Fix32::max(t_min, Fix32::zero()),
-                        Fix32::one());
-                    if (!found || t < impact_t) {
-                        found = true;
-                        impact_t = t;
-                        impact_box = &platform;
-                        impact_player = EntityId::none();
-                    }
+                    hit_box(map_.one_way_platforms[index], padding);
                 }
             }
             players_.for_each([&](Player& player) {
@@ -1634,12 +1630,14 @@ void World::update_projectiles() {
         // shooter's centre to the muzzle first: a wall or a point-blank
         // enemy in front of the shooter must stop the shell instead of
         // letting it spawn on the far side.
+        const Fix32 trace_padding =
+            floor_only ? projectile.half_size : Fix32::zero();
         if (first_update && projectile.ignore_wall == 0) {
             const Player* owner = players_.get(projectile.owner);
             if (owner != nullptr) {
                 impact_start = owner->position;
                 impact_end = previous;
-                trace(Segment{owner->position, previous});
+                trace(Segment{owner->position, previous}, Fix32::zero());
             }
         }
 
@@ -1647,7 +1645,7 @@ void World::update_projectiles() {
         // target no longer swallows the bullet before the player check.
         if (!found) {
             impact_start = previous;
-            trace(Segment{previous, projectile.position});
+            trace(Segment{previous, projectile.position}, trace_padding);
             if (found) {
                 impact_distance = movement_length * impact_t;
             }
@@ -1681,12 +1679,12 @@ void World::update_projectiles() {
                 }
                 finish_impact();
             } else if (impact_box != nullptr) {
+                const Fix32 top = impact_box->min.y - impact_padding;
+                const Fix32 bottom = impact_box->max.y + impact_padding;
                 const bool from_above =
-                    impact_start.y <= impact_box->min.y &&
-                    projectile.position.y >= impact_box->min.y;
+                    impact_start.y <= top && projectile.position.y >= top;
                 const bool from_below =
-                    impact_start.y >= impact_box->max.y &&
-                    projectile.position.y <= impact_box->max.y;
+                    impact_start.y >= bottom && projectile.position.y <= bottom;
                 hit_terrain(
                     !from_above && !from_below, impact_start, from_above);
             }

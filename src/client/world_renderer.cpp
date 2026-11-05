@@ -1382,12 +1382,85 @@ void WorldRenderer::load_particle_atlas(
         particle_atlas_.height);
 }
 
+void WorldRenderer::load_projectile_atlas(
+    const shared::ResourceManager& resources) {
+    const auto text = resources.read_text("sprites/projectiles.atlas.json");
+    if (!text) {
+        NSYNC_LOG_WARN(
+            "client",
+            "projectile atlas missing: sprites/projectiles.atlas.json");
+        return;
+    }
+    core::Atlas next;
+    std::string error;
+    if (!next.load_json(*text, &error)) {
+        NSYNC_LOG_WARN(
+            "client",
+            "failed to load projectile atlas: ",
+            error);
+        return;
+    }
+    const auto bytes = resources.read(next.image);
+    if (!bytes) {
+        NSYNC_LOG_WARN(
+            "client",
+            "failed to read projectile atlas image: ",
+            next.image);
+        return;
+    }
+    RgbaImage image;
+    if (!load_rgba_image(bytes->data(), bytes->size(), image, error)) {
+        NSYNC_LOG_WARN(
+            "client",
+            "failed to decode projectile atlas image: ",
+            error);
+        return;
+    }
+    if (image.width != next.width || image.height != next.height) {
+        NSYNC_LOG_WARN(
+            "client",
+            "projectile atlas dimensions do not match metadata");
+        return;
+    }
+    const bgfx::TextureHandle next_texture = bgfx::createTexture2D(
+        next.width,
+        next.height,
+        false,
+        1,
+        bgfx::TextureFormat::RGBA8,
+        BGFX_SAMPLER_U_CLAMP |
+            BGFX_SAMPLER_V_CLAMP |
+            BGFX_SAMPLER_MIP_POINT,
+        bgfx::copy(
+            image.pixels.data(),
+            static_cast<std::uint32_t>(image.pixels.size())));
+    if (!bgfx::isValid(next_texture)) {
+        NSYNC_LOG_WARN("client", "failed to create projectile atlas texture");
+        return;
+    }
+    if (bgfx::isValid(projectile_texture_)) {
+        bgfx::destroy(projectile_texture_);
+    }
+    projectile_atlas_ = std::move(next);
+    projectile_texture_ = next_texture;
+    projectile_atlas_ready_ = true;
+    NSYNC_LOG_INFO(
+        "client",
+        "loaded projectile atlas: frames=",
+        projectile_atlas_.frames.size(),
+        " image=",
+        projectile_atlas_.width,
+        "x",
+        projectile_atlas_.height);
+}
+
 bool WorldRenderer::reload_visuals(
     const shared::ResourceManager& resources) {
     load_crystal_texture(resources);
     load_bag_atlas(resources);
     load_health_bar_atlas(resources);
     load_particle_atlas(resources);
+    load_projectile_atlas(resources);
     const bool had_visuals = atlas_ready_;
     const auto fail = [&](std::string message) {
         NSYNC_LOG_WARN(
@@ -2261,6 +2334,10 @@ void WorldRenderer::shutdown() {
         bgfx::destroy(particle_texture_);
         particle_texture_ = BGFX_INVALID_HANDLE;
     }
+    if (bgfx::isValid(projectile_texture_)) {
+        bgfx::destroy(projectile_texture_);
+        projectile_texture_ = BGFX_INVALID_HANDLE;
+    }
     if (bgfx::isValid(white_texture_)) {
         bgfx::destroy(white_texture_);
         white_texture_ = BGFX_INVALID_HANDLE;
@@ -2285,12 +2362,14 @@ void WorldRenderer::shutdown() {
     atlas_ = {};
     animations_ = {};
     particle_atlas_ = {};
+    projectile_atlas_ = {};
     original_atlas_ = {};
     hero_rigs_ = {};
     hero_poses_ = {};
     original_image_path_.clear();
     atlas_ready_ = false;
     particle_atlas_ready_ = false;
+    projectile_atlas_ready_ = false;
     original_ready_ = false;
     visuals_.clear();
     clear_effects();
@@ -2361,6 +2440,7 @@ void WorldRenderer::draw(
     std::vector<SpriteVertex> effect_vertices;
     std::vector<SpriteVertex> particle_add_vertices;
     std::vector<SpriteVertex> particle_alpha_vertices;
+    std::vector<SpriteVertex> projectile_vertices;
     world_vertices.reserve(1024);
     sprite_vertices.reserve(512);
     crystal_vertices.reserve(128);
@@ -2372,6 +2452,7 @@ void WorldRenderer::draw(
     effect_vertices.reserve(512);
     particle_add_vertices.reserve(2048);
     particle_alpha_vertices.reserve(1024);
+    projectile_vertices.reserve(64);
     QuadBatch batch(render_camera, width, height, world_vertices);
     QuadBatch sprite_batch(render_camera, width, height, sprite_vertices);
     QuadBatch crystal_batch(render_camera, width, height, crystal_vertices);
@@ -2403,6 +2484,11 @@ void WorldRenderer::draw(
         width,
         height,
         particle_alpha_vertices);
+    QuadBatch projectile_batch(
+        render_camera,
+        width,
+        height,
+        projectile_vertices);
 
     const core::Map& map = world.map();
     if (map_art_ready_) {
@@ -2563,6 +2649,7 @@ void WorldRenderer::draw(
     const float local_y =
         local == nullptr ? 0.0f : to_float(local->position.y);
 
+    const auto render_projectiles = [&]() {
     std::vector<std::uint32_t> live_projectiles;
     live_projectiles.reserve(32);
     const std::uint32_t projectile_tick = world.tick();
@@ -2654,7 +2741,23 @@ void WorldRenderer::draw(
             projectile.half_size,
             core::Fix32::from_ratio(8, 100));
         const float half_world = to_float(projectile_half);
-        if (gadget_projectile_spins(projectile.gadget)) {
+        const bool grenade_shell =
+            projectile.gadget == 0 && projectile.explosive != 0 &&
+            projectile.gravity > core::Fix32::zero();
+        if (grenade_shell && projectile_atlas_ready_) {
+            const std::string_view sprite =
+                projectile.team == 0 ? "grenade_bullet_blue"
+                                     : "grenade_bullet_orange";
+            draw_atlas_billboard(
+                projectile_batch,
+                projectile_atlas_,
+                sprite,
+                to_float(visual.last_position.x),
+                to_float(visual.last_position.y),
+                half_world * 2.2f,
+                0.0f,
+                Color{255, 255, 255, 255});
+        } else if (gadget_projectile_spins(projectile.gadget)) {
             const float spin =
                 presentation_seconds_ * 12.0f +
                 static_cast<float>(projectile.id.raw() % 360U) *
@@ -2810,6 +2913,7 @@ void WorldRenderer::draw(
         }
         it = projectile_visuals_.erase(it);
     }
+    };
 
     const std::uint32_t sim_tick = world.tick();
     // Original ClientGame.Update / PhysicalArtifact.Interpolate:
@@ -3727,6 +3831,8 @@ void WorldRenderer::draw(
         }
     });
 
+    render_projectiles();
+
     for (const EffectVisual& effect : effects_) {
         const float progress = std::clamp(
             effect.age_seconds / std::max(0.001f, effect.life_seconds),
@@ -4162,6 +4268,9 @@ void WorldRenderer::draw(
     if (particle_atlas_ready_) {
         submit(particle_alpha_vertices, particle_texture_, false);
         submit(particle_add_vertices, particle_texture_, true);
+    }
+    if (projectile_atlas_ready_) {
+        submit(projectile_vertices, projectile_texture_);
     }
     if (health_bar_ready_) {
         submit(health_bar_vertices, health_bar_texture_);
