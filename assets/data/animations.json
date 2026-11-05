@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "name": "scout.idle",
+      "fps": 6,
+      "loop": true,
+      "frames": [
+        "scout_idle_0",
+        "scout_idle_1",
+        "scout_idle_2",
+        "scout_idle_3"
+      ]
+    },
+    {
+      "name": "scout.run",
+      "fps": 10,
+      "loop": true,
+      "frames": [
+        "scout_run_0",
+        "scout_run_1",
+        "scout_run_2",
+        "scout_run_3"
+      ]
+    },
+    {
+      "name": "scout.jump",
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "scout_jump_0",
+        "scout_jump_1",
+        "scout_jump_2",
+        "scout_jump_3"
+      ]
+    },
+    {
+      "name": "scout.fall",
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "scout_fall_0",
+        "scout_fall_1",
+        "scout_fall_2",
+        "scout_fall_3"
+      ]
+    },
+    {
+      "name": "scout.shoot",
+      "fps": 12,
+      "loop": true,
+      "frames": [
+        "scout_shoot_0",
+        "scout_shoot_1",
+        "scout_shoot_2",
+        "scout_shoot_3"
+      ]
+    },
+    {
+      "name": "scout.hurt",
+      "fps": 10,
+      "loop": false,
+      "frames": [
+        "scout_hurt_0",
+        "scout_hurt_1",
+        "scout_hurt_2",
+        "scout_hurt_3"
+      ]
+    },
+    {
+      "name": "scout.death",
+      "fps": 6,
+      "loop": false,
+      "frames": [
+        "scout_death_0",
+        "scout_death_1",
+        "scout_death_2",
+        "scout_death_3"
+      ]
+    },
+    {
+      "name": "gunner.idle",
+      "fps": 6,
+      "loop": true,
+      "frames": [
+        "gunner_idle_0",
+        "gunner_idle_1",
+        "gunner_idle_2",
+        "gunner_idle_3"
+      ]
+    },
+    {
+      "name": "gunner.run",
+      "fps": 10,
+      "loop": true,
+      "frames": [
+        "gunner_run_0",
+        "gunner_run_1",
+        "gunner_run_2",
+        "gunner_run_3"
+      ]
+    },
+    {
+      "name": "gunner.jump",
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "gunner_jump_0",
+        "gunner_jump_1",
+        "gunner_jump_2",
+        "gunner_jump_3"
+      ]
+    },
+    {
+      "name": "gunner.fall",
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "gunner_fall_0",
+        "gunner_fall_1",
+        "gunner_fall_2",
+        "gunner_fall_3"
+      ]
+    },
+    {
+      "name": "gunner.shoot",
+      "fps": 12,
+      "loop": true,
+      "frames": [
+        "gunner_shoot_0",
+        "gunner_shoot_1",
+        "gunner_shoot_2",
+        "gunner_shoot_3"
+      ]
+    },
+    {
+      "name": "gunner.hurt",
+      "fps": 10,
+      "loop": false,
+      "frames": [
+        "gunner_hurt_0",
+        "gunner_hurt_1",
+        "gunner_hurt_2",
+        "gunner_hurt_3"
+      ]
+    },
+    {
+      "name": "gunner.death",
+      "fps": 6,
+      "loop": false,
+      "frames": [
+        "gunner_death_0",
+        "gunner_death_1",
+        "gunner_death_2",
+        "gunner_death_3"
+      ]
+    },
+    {
+      "name": "assault.idle",
+      "fps": 6,
+      "loop": true,
+      "frames": [
+        "assault_idle_0",
+        "assault_idle_1",
+        "assault_idle_2",
+        "assault_idle_3"
+      ]
+    },
+    {
+      "name": "assault.run",
+      "fps": 10,
+      "loop": true,
+      "frames": [
+        "assault_run_0",
+        "assault_run_1",
+        "assault_run_2",
+        "assault_run_3"
+      ]
+    },
+    {
+      "name": "assault.jump",
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "assault_jump_0",
+        "assault_jump_1",
+        "assault_jump_2",
+        "assault_jump_3"
+      ]
+    },
+    {
+      "name": "assault.fall",
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "assault_fall_0",
+        "assault_fall_1",
+        "assault_fall_2",
+        "assault_fall_3"
+      ]
+    },
+    {
+      "name": "assault.shoot",
+      "fps": 12,
+      "loop": true,
+      "frames": [
+        "assault_shoot_0",
+        "assault_shoot_1",
+        "assault_shoot_2",
+        "assault_shoot_3"
+      ]
+    },
+    {
+      "name": "assault.hurt",
+      "fps": 10,
+      "loop": false,
+      "frames": [
+        "assault_hurt_0",
+        "assault_hurt_1",
+        "assault_hurt_2",
+        "assault_hurt_3"
+      ]
+    },
+    {
+      "name": "assault.death",
+      "fps": 6,
+      "loop": false,
+      "frames": [
+        "assault_death_0",
+        "assault_death_1",
+        "assault_death_2",
+        "assault_death_3"
+      ]
+    }
+  ]
+}

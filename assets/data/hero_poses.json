@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "states": {
+    "idle": {
+      "duration": 1.8,
+      "loop": true,
+      "tracks": [
+        {"role": "body", "offset_y": 0.004, "sway_y": 0.007, "sway_rotation": 0.8, "frequency": 0.55, "phase": 0.0},
+        {"role": "head", "offset_y": 0.002, "sway_rotation": 1.4, "frequency": 0.55, "phase": 0.35},
+        {"role": "shoulder_back", "sway_rotation": 0.9, "frequency": 0.55, "phase": 0.2},
+        {"role": "shoulder_front", "sway_rotation": 1.1, "frequency": 0.55, "phase": 0.55},
+        {"role": "weapon", "offset_y": 0.004, "sway_rotation": 0.8, "frequency": 0.55, "phase": 0.2}
+      ]
+    },
+    "run": {
+      "duration": 0.42,
+      "loop": true,
+      "tracks": [
+        {"role": "body", "offset_y": 0.012, "sway_y": 0.018, "rotation": 5.0, "sway_rotation": 2.5, "frequency": 2.4, "phase": 0.0},
+        {"role": "head", "rotation": 1.0, "sway_rotation": 3.0, "frequency": 2.4, "phase": 0.35},
+        {"role": "shoulder_back", "sway_rotation": 10.0, "frequency": 2.4, "phase": 0.0},
+        {"role": "shoulder_front", "sway_rotation": 10.0, "frequency": 2.4, "phase": 3.14159},
+        {"role": "foot_back", "rotation": 4.0, "sway_rotation": 24.0, "frequency": 2.4, "phase": 0.0},
+        {"role": "foot_front", "rotation": -4.0, "sway_rotation": 24.0, "frequency": 2.4, "phase": 3.14159},
+        {"role": "weapon", "offset_y": 0.008, "sway_rotation": 4.0, "frequency": 2.4, "phase": 0.45}
+      ]
+    },
+    "jump": {
+      "duration": 0.9,
+      "loop": true,
+      "tracks": [
+        {"role": "body", "offset_y": 0.025, "rotation": 4.0, "sway_y": 0.004, "frequency": 1.2},
+        {"role": "head", "rotation": -2.0, "sway_rotation": 1.5, "frequency": 1.2, "phase": 0.3},
+        {"role": "foot_back", "rotation": 16.0, "sway_rotation": 4.0, "frequency": 1.2},
+        {"role": "foot_front", "rotation": -12.0, "sway_rotation": 4.0, "frequency": 1.2, "phase": 3.14159},
+        {"role": "weapon", "offset_y": 0.018, "rotation": 4.0, "sway_rotation": 1.5, "frequency": 1.2, "phase": 0.2}
+      ]
+    },
+    "fall": {
+      "duration": 0.9,
+      "loop": true,
+      "tracks": [
+        {"role": "body", "offset_y": -0.005, "rotation": -3.0, "sway_y": 0.004, "frequency": 1.1},
+        {"role": "head", "rotation": 2.0, "sway_rotation": 1.5, "frequency": 1.1, "phase": 0.25},
+        {"role": "foot_back", "rotation": -10.0, "sway_rotation": 5.0, "frequency": 1.1},
+        {"role": "foot_front", "rotation": 10.0, "sway_rotation": 5.0, "frequency": 1.1, "phase": 3.14159},
+        {"role": "weapon", "offset_y": -0.004, "rotation": -2.0, "sway_rotation": 2.0, "frequency": 1.1, "phase": 0.2}
+      ]
+    },
+    "shoot": {
+      "duration": 0.22,
+      "loop": false,
+      "tracks": [
+        {"role": "body", "rotation": 2.0, "sway_rotation": 1.2, "frequency": 6.0, "phase": 0.0},
+        {"role": "head", "rotation": -1.0, "sway_rotation": 1.0, "frequency": 6.0, "phase": 0.4},
+        {"role": "shoulder_front", "sway_rotation": 2.0, "frequency": 6.0, "phase": 0.2},
+        {"role": "weapon", "offset_x": 0.012, "offset_y": 0.002, "rotation": -2.0, "sway_rotation": 2.0, "frequency": 6.0, "phase": 0.0}
+      ]
+    },
+    "hurt": {
+      "duration": 0.25,
+      "loop": false,
+      "tracks": [
+        {"role": "body", "offset_x": 0.025, "rotation": -8.0, "sway_rotation": 2.0, "frequency": 7.0, "phase": 0.0},
+        {"role": "head", "offset_x": 0.012, "rotation": -5.0, "sway_rotation": 2.0, "frequency": 7.0, "phase": 0.3},
+        {"role": "shoulder_back", "rotation": -3.0, "sway_rotation": 2.0, "frequency": 7.0, "phase": 0.5},
+        {"role": "weapon", "offset_x": 0.018, "rotation": -4.0, "sway_rotation": 2.0, "frequency": 7.0, "phase": 0.1}
+      ]
+    },
+    "death": {
+      "duration": 0.9,
+      "loop": false,
+      "root_rotation_start": 0.0,
+      "root_rotation_end": -78.0,
+      "root_offset_x_start": 0.0,
+      "root_offset_x_end": 0.08,
+      "root_offset_y_start": 0.0,
+      "root_offset_y_end": -0.06,
+      "alpha_start": 1.0,
+      "alpha_end": 0.35,
+      "tracks": []
+    }
+  },
+  "recoil": {
+    "offset_x": 0.06,
+    "offset_y": 0.0,
+    "rotation_deg": -7.0,
+    "decay": 18.0
+  }
+}

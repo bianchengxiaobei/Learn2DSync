@@ -1,0 +1,996 @@
+{
+  "version": 1,
+  "image": "generated/original_heroes/heroes.png",
+  "width": 512,
+  "height": 830,
+  "frames": [
+    {
+      "name": "scout_foot",
+      "rect": [
+        120,
+        805,
+        38,
+        24
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "scout_shoulder_back",
+      "rect": [
+        417,
+        723,
+        33,
+        35
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "scout_body",
+      "rect": [
+        204,
+        159,
+        63,
+        114
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "scout_shoulder_front",
+      "rect": [
+        50,
+        723,
+        41,
+        42
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "scout_head",
+      "rect": [
+        0,
+        475,
+        70,
+        71
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "scout_hand_back",
+      "rect": [
+        107,
+        768,
+        29,
+        32
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "scout_hand_front",
+      "rect": [
+        363,
+        768,
+        33,
+        29
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "weapon_rifle",
+      "rect": [
+        219,
+        614,
+        120,
+        54
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "weapon_shotgun",
+      "rect": [
+        0,
+        805,
+        93,
+        25
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "weapon_rocket",
+      "rect": [
+        282,
+        723,
+        75,
+        40
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "weapon_smg",
+      "rect": [
+        136,
+        288,
+        160,
+        88
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "weapon_burst",
+      "rect": [
+        52,
+        670,
+        154,
+        51
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "weapon_grenade",
+      "rect": [
+        385,
+        723,
+        30,
+        36
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_foot",
+      "rect": [
+        314,
+        768,
+        47,
+        29
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_shoulder_back",
+      "rect": [
+        299,
+        391,
+        66,
+        72
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_body",
+      "rect": [
+        0,
+        159,
+        110,
+        127
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_shoulder_front",
+      "rect": [
+        172,
+        391,
+        80,
+        77
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_head",
+      "rect": [
+        448,
+        614,
+        42,
+        52
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_hand_back",
+      "rect": [
+        111,
+        614,
+        51,
+        54
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "gunner_hand_front",
+      "rect": [
+        348,
+        548,
+        56,
+        57
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_foot",
+      "rect": [
+        37,
+        768,
+        68,
+        33
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_shoulder_back",
+      "rect": [
+        115,
+        548,
+        51,
+        60
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_body",
+      "rect": [
+        0,
+        0,
+        105,
+        157
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_shoulder_front",
+      "rect": [
+        385,
+        288,
+        72,
+        83
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_head",
+      "rect": [
+        72,
+        475,
+        56,
+        69
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_hand_back",
+      "rect": [
+        414,
+        670,
+        48,
+        46
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "assault_hand_front",
+      "rect": [
+        0,
+        614,
+        56,
+        54
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_foot",
+      "rect": [
+        359,
+        723,
+        24,
+        36
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_shoulder_back",
+      "rect": [
+        58,
+        614,
+        51,
+        54
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_body",
+      "rect": [
+        269,
+        159,
+        121,
+        112
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_shoulder_front",
+      "rect": [
+        130,
+        475,
+        70,
+        67
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_head",
+      "rect": [
+        228,
+        548,
+        70,
+        59
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_hand_back",
+      "rect": [
+        237,
+        723,
+        43,
+        41
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "grenadier_hand_front",
+      "rect": [
+        0,
+        670,
+        50,
+        51
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_foot",
+      "rect": [
+        138,
+        768,
+        34,
+        30
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_shoulder_back",
+      "rect": [
+        287,
+        768,
+        25,
+        29
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_body",
+      "rect": [
+        0,
+        288,
+        50,
+        101
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_shoulder_front",
+      "rect": [
+        464,
+        670,
+        34,
+        45
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_head",
+      "rect": [
+        313,
+        670,
+        44,
+        48
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_hand_back",
+      "rect": [
+        95,
+        805,
+        23,
+        24
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "cyborg_hand_front",
+      "rect": [
+        398,
+        768,
+        30,
+        25
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_foot",
+      "rect": [
+        174,
+        768,
+        50,
+        30
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_shoulder_back",
+      "rect": [
+        0,
+        548,
+        68,
+        64
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_body",
+      "rect": [
+        249,
+        0,
+        152,
+        151
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_shoulder_front",
+      "rect": [
+        0,
+        391,
+        89,
+        82
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_head",
+      "rect": [
+        367,
+        391,
+        80,
+        72
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_hand_back",
+      "rect": [
+        321,
+        475,
+        63,
+        65
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "hermit_hand_front",
+      "rect": [
+        386,
+        475,
+        68,
+        64
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_foot",
+      "rect": [
+        226,
+        768,
+        59,
+        30
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_shoulder_back",
+      "rect": [
+        70,
+        548,
+        43,
+        63
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_body",
+      "rect": [
+        107,
+        0,
+        140,
+        155
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_shoulder_front",
+      "rect": [
+        406,
+        548,
+        79,
+        56
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_head",
+      "rect": [
+        298,
+        288,
+        85,
+        84
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_hand_back",
+      "rect": [
+        341,
+        614,
+        48,
+        53
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "predator_hand_front",
+      "rect": [
+        256,
+        670,
+        55,
+        49
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_foot",
+      "rect": [
+        359,
+        670,
+        53,
+        48
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_shoulder_back",
+      "rect": [
+        202,
+        475,
+        52,
+        67
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_body",
+      "rect": [
+        403,
+        0,
+        98,
+        138
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_shoulder_front",
+      "rect": [
+        112,
+        159,
+        90,
+        125
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_head",
+      "rect": [
+        449,
+        391,
+        50,
+        72
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_hand_back",
+      "rect": [
+        164,
+        614,
+        53,
+        54
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "pyromancer_hand_front",
+      "rect": [
+        391,
+        614,
+        55,
+        53
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_foot",
+      "rect": [
+        452,
+        723,
+        44,
+        35
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_shoulder_back",
+      "rect": [
+        254,
+        391,
+        43,
+        74
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_body",
+      "rect": [
+        392,
+        159,
+        107,
+        102
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_shoulder_front",
+      "rect": [
+        168,
+        548,
+        58,
+        60
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_head",
+      "rect": [
+        300,
+        548,
+        46,
+        58
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_hand_back",
+      "rect": [
+        93,
+        723,
+        42,
+        42
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "soldier_hand_front",
+      "rect": [
+        137,
+        723,
+        49,
+        42
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_foot",
+      "rect": [
+        0,
+        768,
+        35,
+        35
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_shoulder_back",
+      "rect": [
+        208,
+        670,
+        46,
+        50
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_body",
+      "rect": [
+        52,
+        288,
+        82,
+        100
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_shoulder_front",
+      "rect": [
+        256,
+        475,
+        63,
+        67
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_head",
+      "rect": [
+        91,
+        391,
+        79,
+        80
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_hand_back",
+      "rect": [
+        188,
+        723,
+        47,
+        42
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    },
+    {
+      "name": "warrioress_hand_front",
+      "rect": [
+        0,
+        723,
+        48,
+        43
+      ],
+      "pivot": [
+        0.5,
+        0.5
+      ]
+    }
+  ]
+}

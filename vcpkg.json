@@ -1,0 +1,21 @@
+{
+  "name": "nsync",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "sdl3",
+    {
+      "name": "bgfx",
+      "features": [
+        "tools"
+      ]
+    },
+    {
+      "name": "rmlui",
+      "features": [
+        "freetype"
+      ]
+    },
+    "kcp",
+    "stb"
+  ]
+}

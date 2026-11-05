@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "image": "sprites/crystal_bag.png",
+  "width": 389,
+  "height": 192,
+  "frames": [
+    {
+      "name": "bag_1",
+      "rect": [
+        1,
+        1,
+        86,
+        123
+      ],
+      "pivot": [
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "name": "bag_2",
+      "rect": [
+        89,
+        1,
+        121,
+        143
+      ],
+      "pivot": [
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "name": "bag_3",
+      "rect": [
+        212,
+        1,
+        174,
+        190
+      ],
+      "pivot": [
+        0.5,
+        1.0
+      ]
+    }
+  ]
+}

@@ -1,0 +1,309 @@
+<rml>
+<head>
+    <title>NSYNC</title>
+    <link type="text/css" href="game.rcss" />
+</head>
+<body>
+    <div id="screen-menu" class="screen">
+        <div class="menu-top">
+            <div class="brand">ON<span>RAID</span></div>
+            <div class="brand-sub">REALTIME ARENA // C++20</div>
+        </div>
+        <div class="menu-grid">
+            <div class="menu-card">
+                <div class="eyebrow" data-loc="menu.eyebrow">OFFLINE SKIRMISH</div>
+                <h1 data-loc="menu.title">DEPLOYMENT</h1>
+                <p id="menu-description" class="description" data-loc="menu.description">Pick an agent, choose a mode, and drop into the arena.</p>
+                <div class="section-label" data-loc="menu.agent">AGENT</div>
+                <div id="menu-heroes" class="hero-grid"></div>
+                <div class="menu-name">
+                    <span data-loc="menu.player">PLAYER</span>
+                    <strong id="menu-player">player</strong>
+                </div>
+            </div>
+            <div class="menu-card menu-side">
+                <div class="section-label" data-loc="menu.mode">MODE</div>
+                <button id="menu-mode-tdm" class="mode-button selected" data-action="mode" data-value="tdm">
+                    <strong data-loc="menu.tdm">TDM</strong>
+                    <span data-loc="menu.tdm.description">Team deathmatch. First to 30 or highest score at time.</span>
+                </button>
+                <button id="menu-mode-control" class="mode-button" data-action="mode" data-value="control">
+                    <strong data-loc="menu.control">CONTROL</strong>
+                    <span data-loc="menu.control.description">Hold the point. Capture, then score every 5 seconds.</span>
+                </button>
+                <button id="menu-mode-crystal" class="mode-button" data-action="mode" data-value="crystal">
+                    <strong data-loc="menu.crystal">CRYSTAL</strong>
+                    <span data-loc="menu.crystal.description">Grab crystals and deliver them to your depot.</span>
+                </button>
+                <div class="section-label" data-loc="menu.arena">ARENA</div>
+                <div id="menu-map" class="info-line">maps/arena_01.json</div>
+                <div class="spacer"></div>
+                <button id="menu-start" class="button primary" data-action="start" data-loc="menu.deploy">DEPLOY</button>
+                <button id="menu-settings" class="button ghost" data-action="settings-open" data-loc="menu.settings">SETTINGS</button>
+                <button id="menu-quit" class="button ghost" data-action="quit" data-loc="menu.quit">QUIT</button>
+                <div id="menu-status" class="small" data-loc="menu.status">AWAITING DEPLOYMENT</div>
+            </div>
+        </div>
+        <div id="menu-controls" class="menu-footer">1/2/3 AGENT  A/D MOVE  W JUMP  LMB FIRE  R RELOAD  Q WEAPON  E/F/G SKILLS  TAB SCORE  ESC PAUSE  F5 RELOAD ASSETS</div>
+    </div>
+
+    <div id="screen-lobby" class="screen">
+        <div class="lobby-head">
+            <div>
+                <div class="eyebrow" data-loc="lobby.eyebrow">SERVER AUTHORITATIVE</div>
+                <h1 data-loc="lobby.title">WAR ROOM</h1>
+            </div>
+            <div class="lobby-state">
+                <span id="lobby-status" data-loc="lobby.connecting">CONNECTING</span>
+                <strong id="lobby-ready-count">0 / 0 READY</strong>
+            </div>
+        </div>
+        <div id="lobby-countdown" class="countdown">STARTING</div>
+        <div class="lobby-body">
+            <div class="team-panel team-blue">
+                <div class="team-head"><span data-loc="lobby.team.blue">TEAM BLUE</span><strong id="lobby-blue-count">0</strong></div>
+                <div id="lobby-team-blue" class="team-list"></div>
+            </div>
+            <div class="lobby-center">
+                <div class="section-label" data-loc="lobby.your_agent">YOUR AGENT</div>
+                <div id="lobby-heroes" class="hero-grid compact"></div>
+                <div id="lobby-local" class="local-card" data-loc="lobby.waiting">WAITING FOR SESSION</div>
+                <button id="lobby-ready" class="button primary" data-action="ready" data-loc="lobby.ready">READY</button>
+                <button id="lobby-quit" class="button ghost" data-action="quit" data-loc="lobby.leave">LEAVE</button>
+                <div class="small" data-loc="lobby.controls">R READY / 1 2 3 SELECT AGENT</div>
+            </div>
+            <div class="team-panel team-red">
+                <div class="team-head"><span data-loc="lobby.team.red">TEAM RED</span><strong id="lobby-red-count">0</strong></div>
+                <div id="lobby-team-red" class="team-list"></div>
+            </div>
+        </div>
+        <div class="lobby-footer">
+            <span id="lobby-server">SERVER --</span>
+            <span data-loc="lobby.footer">ALL HUMANS MUST READY. EMPTY SLOTS ARE FILLED WITH BOTS.</span>
+        </div>
+    </div>
+
+    <div id="screen-hud" class="screen">
+        <div id="damage-flash"></div>
+        <div id="match-top">
+            <div class="score-strip">
+                <span id="hud-mode" class="mode-tag">TDM</span>
+                <span id="hud-score-blue" class="score score-blue">0</span>
+                <span id="hud-clock" class="clock">05:00</span>
+                <span id="hud-score-red" class="score score-red">0</span>
+                <span id="hud-limit" class="limit">/ 30</span>
+            </div>
+            <div id="hud-objective" class="objective">
+                <span id="hud-objective-label" data-loc="hud.control_point">CONTROL POINT</span>
+                <div class="bar objective-bar"><div id="hud-objective-fill"></div></div>
+                <span id="hud-objective-value">0%</span>
+            </div>
+        </div>
+        <div id="hud-feed"></div>
+        <div id="hud-notice" class="toast"></div>
+        <div id="crosshair">+</div>
+        <div id="hud-vitals" class="vitals">
+            <div class="vitals-top"><span id="hud-hero">SCOUT</span><span id="hud-alive">LIVE</span></div>
+            <div class="bar health"><div id="hud-health-fill"></div></div>
+            <div class="bar shield"><div id="hud-shield-fill"></div></div>
+            <div class="vitals-bottom">
+                <span id="hud-health-text">100 / 100</span>
+                <span id="hud-shield-text">SH 50 / 50</span>
+                <span id="hud-weapon">RIFLE</span>
+                <span id="hud-ammo">8</span>
+            </div>
+        </div>
+        <div id="hud-gadgets" class="gadgets">
+                <div class="gadget-card" id="hud-gadget-0">
+                    <span id="hud-gadget-0-key" class="gadget-key">E</span>
+                    <span id="hud-gadget-0-name" class="gadget-name">RUBY BLADE</span>
+                    <span id="hud-gadget-0-state" class="gadget-state ready">READY</span>
+                    <div class="gadget-track"><div id="hud-gadget-0-fill"></div></div>
+                </div>
+                <div class="gadget-card" id="hud-gadget-1">
+                    <span id="hud-gadget-1-key" class="gadget-key">F</span>
+                    <span id="hud-gadget-1-name" class="gadget-name">POWER BATTERY</span>
+                    <span id="hud-gadget-1-state" class="gadget-state ready">READY</span>
+                    <div class="gadget-track"><div id="hud-gadget-1-fill"></div></div>
+                </div>
+                <div class="gadget-card" id="hud-gadget-2">
+                    <span id="hud-gadget-2-key" class="gadget-key">G</span>
+                    <span id="hud-gadget-2-name" class="gadget-name">MAGNETIC NOZZLE</span>
+                    <span id="hud-gadget-2-state" class="gadget-state ready">READY</span>
+                    <div class="gadget-track"><div id="hud-gadget-2-fill"></div></div>
+                </div>
+        </div>
+        <div id="hud-death" class="death">
+            <div class="eyebrow" data-loc="hud.eliminated">ELIMINATED</div>
+            <div id="hud-death-timer" data-loc="hud.respawn_in">RESPAWN IN 10</div>
+        </div>
+        <div id="hud-net">LOCAL 60 FPS</div>
+        <div id="hud-controls">A/D MOVE  W JUMP  LMB FIRE  R RELOAD  Q WEAPON  E/F/G SKILLS  TAB SCORE  ESC PAUSE</div>
+        <div id="scoreboard" class="scoreboard">
+            <div class="sb-panel">
+                <div class="sb-head"><span data-loc="hud.scoreboard">SCOREBOARD</span><strong id="scoreboard-score">0 - 0</strong></div>
+                <div class="sb-row sb-labels">
+                    <span class="sb-col sb-name" data-loc="hud.player">PLAYER</span>
+                    <span class="sb-col sb-hero" data-loc="hud.hero">HERO</span>
+                    <span class="sb-col sb-k" data-loc="hud.k">K</span>
+                    <span class="sb-col sb-d" data-loc="hud.d">D</span>
+                    <span class="sb-col sb-dmg" data-loc="hud.dmg">DMG</span>
+                    <span class="sb-col sb-block" data-loc="hud.block">BLOCK</span>
+                    <span class="sb-col sb-hp" data-loc="hud.hp">HP</span>
+                    <span class="sb-col sb-status" data-loc="hud.status">STATUS</span>
+                </div>
+                <div id="scoreboard-teams"></div>
+                <div class="sb-foot" data-loc="hud.tab_close">TAB TO CLOSE</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-pause" class="screen overlay">
+        <div class="modal">
+            <div class="eyebrow" data-loc="pause.eyebrow">SIMULATION PAUSED</div>
+            <h1 data-loc="pause.title">PAUSED</h1>
+            <p id="pause-subtitle" class="description" data-loc="pause.description">The local simulation is frozen. Resume when you are ready.</p>
+            <button class="button primary" data-action="resume" data-loc="pause.resume">RESUME</button>
+            <button class="button" data-action="settings-open" data-loc="pause.settings">SETTINGS</button>
+            <button class="button" data-action="menu" data-loc="pause.menu">MAIN MENU</button>
+            <button class="button ghost" data-action="quit" data-loc="pause.quit">QUIT TO DESKTOP</button>
+        </div>
+    </div>
+
+    <div id="screen-results" class="screen overlay">
+        <div class="modal wide">
+            <div id="results-kicker" class="eyebrow">MATCH COMPLETE</div>
+            <h1 id="results-title">VICTORY</h1>
+            <div id="results-score" class="result-score">0 : 0</div>
+            <div id="results-subtitle" class="description">Team Blue wins the arena.</div>
+            <div id="results-teams" class="results-teams"></div>
+            <div class="modal-actions">
+                <button id="results-rematch" class="button primary" data-action="rematch" data-loc="results.rematch">REMATCH</button>
+                <button id="results-menu" class="button" data-action="menu" data-loc="results.menu">MAIN MENU</button>
+                <button class="button ghost" data-action="quit" data-loc="results.quit">QUIT</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-settings" class="screen overlay">
+        <div class="settings-panel">
+            <div class="settings-head">
+                <div>
+                    <div class="eyebrow" data-loc="settings.eyebrow">CLIENT CONFIGURATION</div>
+                    <h1 id="settings-title" data-loc="settings.title">SETTINGS</h1>
+                </div>
+                <div class="settings-head-state">
+                    <button id="settings-language" class="button ghost settings-lang" data-action="settings-language-toggle">ENGLISH</button>
+                    <span id="settings-audio-status">AUDIO READY</span>
+                    <strong data-loc="settings.close">ESC TO CLOSE</strong>
+                </div>
+            </div>
+            <div class="settings-tab-bar">
+                <button id="settings-tab-game" class="settings-tab selected" data-action="settings-tab" data-value="game" data-loc="settings.tab.game">GAME</button>
+                <button id="settings-tab-controls" class="settings-tab" data-action="settings-tab" data-value="controls" data-loc="settings.tab.controls">CONTROLS</button>
+            </div>
+
+            <div id="settings-page-game" class="settings-page">
+                <div class="settings-columns">
+                    <div class="settings-card">
+                        <div class="section-label" data-loc="settings.audio">AUDIO</div>
+                        <div class="setting-row">
+                            <div class="setting-copy">
+                                <strong data-loc="settings.sound_effects">SOUND EFFECTS</strong>
+                                <span data-loc="settings.sound_desc">Master switch for weapon, impact and UI cues</span>
+                            </div>
+                            <button id="settings-audio-toggle" class="setting-toggle on" data-action="settings-audio-toggle">ON</button>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-copy">
+                                <strong data-loc="settings.master_volume">MASTER VOLUME</strong>
+                                <span id="settings-volume-value">80%</span>
+                            </div>
+                        </div>
+                        <div id="settings-volume-track" class="volume-track">
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="0"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="10"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="20"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="30"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="40"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="50"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="60"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="70"></div>
+                            <div class="volume-seg filled" data-action="settings-volume" data-value="80"></div>
+                            <div class="volume-seg" data-action="settings-volume" data-value="90"></div>
+                            <div class="volume-seg" data-action="settings-volume" data-value="100"></div>
+                        </div>
+                        <div class="small" data-loc="settings.audio_note">Click a segment to set volume. Music and announcer tracks are not available yet.</div>
+                    </div>
+                    <div class="settings-card">
+                        <div class="section-label" data-loc="settings.video">VIDEO</div>
+                        <div class="setting-row">
+                            <div class="setting-copy">
+                                <strong data-loc="settings.resolution">RESOLUTION</strong>
+                                <span id="settings-resolution">1280 x 720</span>
+                            </div>
+                            <div class="setting-buttons">
+                                <button class="mini button ghost" data-action="settings-res-prev" data-loc="settings.prev">PREV</button>
+                                <button class="mini button ghost" data-action="settings-res-next" data-loc="settings.next">NEXT</button>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-copy">
+                                <strong data-loc="settings.fullscreen">FULLSCREEN</strong>
+                                <span data-loc="settings.fullscreen_desc">Use the selected mode on the primary display</span>
+                            </div>
+                            <button id="settings-fullscreen" class="setting-toggle" data-action="settings-fullscreen-toggle">OFF</button>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-copy">
+                                <strong data-loc="settings.vsync">VSYNC</strong>
+                                <span data-loc="settings.vsync_desc">Display synchronization</span>
+                            </div>
+                            <button id="settings-vsync" class="setting-toggle on" data-action="settings-vsync-toggle">ON</button>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-copy">
+                                <strong data-loc="settings.blood">BLOOD EFFECTS</strong>
+                                <span data-loc="settings.blood_desc">Red health-hit flashes and death burst</span>
+                            </div>
+                            <button id="settings-blood" class="setting-toggle on" data-action="settings-blood-toggle">ON</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="settings-page-controls" class="settings-page">
+                <div class="settings-card bind-card">
+                    <div class="section-label" data-loc="settings.key_bindings">KEY BINDINGS</div>
+                    <div class="small" data-loc="settings.key_help">Click a binding, then press a key. Backspace resets it; Escape cancels. Mouse fire is fixed to LMB.</div>
+                    <div id="settings-bindings" class="bind-list"></div>
+                </div>
+            </div>
+
+            <div class="settings-footer">
+                <button id="settings-reset" class="button ghost" data-action="settings-reset" data-loc="settings.reset">RESET DEFAULTS</button>
+                <div id="settings-status" class="settings-status" data-loc="settings.changes_apply">CHANGES APPLY ON APPLY</div>
+                <button class="button" data-action="settings-cancel" data-loc="settings.cancel">CANCEL</button>
+                <button class="button primary" data-action="settings-save" data-loc="settings.apply">APPLY</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-loading" class="screen">
+        <div class="loading-panel">
+            <div class="brand">ON<span>RAID</span></div>
+            <div id="loading-kicker" class="loading-kicker" data-loc="loading.kicker">CLIENT BOOT</div>
+            <h1 id="loading-step" data-loc="loading.resources">CHECKING RESOURCES</h1>
+            <p id="loading-detail" class="description" data-loc="loading.detail">RMLUI // SDL3 // BGFX</p>
+            <div id="loading-progress" class="loading-progress"><div id="loading-fill"></div></div>
+            <div id="loading-error" class="loading-error">
+                <div class="eyebrow" data-loc="loading.error_kicker">CLIENT ERROR</div>
+                <h2 id="loading-error-title">ERROR</h2>
+                <p id="loading-error-text" class="description"></p>
+                <p id="loading-error-recommendation" class="small"></p>
+                <button class="button primary" data-action="loading-dismiss" data-loc="loading.ok">OK</button>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

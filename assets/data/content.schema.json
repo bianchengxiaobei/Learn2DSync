@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nsync.local/schema/content.schema.json",
+  "title": "NSYNC content definitions",
+  "type": "object",
+  "required": ["version", "heroes", "weapons"],
+  "additionalProperties": true,
+  "properties": {
+    "version": { "const": 1 },
+    "heroes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "health", "shield", "run_speed", "jump_speed",
+          "ability", "ability_name", "ability_cooldown",
+          "ability_duration", "ability_power"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "health": { "type": "integer", "minimum": 1, "maximum": 4096 },
+          "shield": { "type": "integer", "minimum": 0, "maximum": 4096 },
+          "run_speed": { "type": "number", "exclusiveMinimum": 0 },
+          "jump_speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 16 },
+          "ability": { "enum": ["dash", "shield", "overcharge"] },
+          "ability_name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "ability_cooldown": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "ability_duration": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "ability_power": { "type": "number", "exclusiveMinimum": 0, "maximum": 4096 },
+          "surface_area": { "type": "number", "exclusiveMinimum": 0, "maximum": 16 },
+          "weapon": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    },
+    "weapons": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "magazine", "fire_interval", "reload_ticks", "damage",
+          "pellets", "projectile_life", "projectile_speed", "spread",
+          "projectile_half_size", "explosion_radius",
+          "explosion_damage", "explosive"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "magazine": { "type": "integer", "minimum": 1, "maximum": 512 },
+          "fire_interval": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "reload_ticks": { "type": "integer", "minimum": 0, "maximum": 6000 },
+          "reload_size": { "type": "integer", "minimum": 0, "maximum": 512 },
+          "warmup_ticks": { "type": "integer", "minimum": 0, "maximum": 6000 },
+          "damage": { "type": "integer", "minimum": 0, "maximum": 2000 },
+          "pellets": { "type": "integer", "minimum": 1, "maximum": 32 },
+          "projectile_life": { "type": "integer", "minimum": 1, "maximum": 3600 },
+          "projectile_speed": { "type": "number", "exclusiveMinimum": 0 },
+          "spread": { "type": "number", "minimum": 0 },
+          "projectile_half_size": { "type": "number", "exclusiveMinimum": 0 },
+          "range": { "type": "number", "minimum": 0 },
+          "falloff_start": { "type": "number", "minimum": 0, "maximum": 1 },
+          "falloff_end": { "type": "number", "minimum": 0, "maximum": 1 },
+          "platform_puncher": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "terrain_bounces": { "type": "integer", "minimum": 0, "maximum": 8 },
+          "explode_on_expire": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "blast_falloff_start": { "type": "number", "minimum": 0, "maximum": 1 },
+          "blast_falloff_end": { "type": "number", "minimum": 0, "maximum": 1 },
+          "blast_self_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+          "blast_friend_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+          "explosion_impulse": { "type": "number", "minimum": 0 },
+          "explosion_ground_impulse": { "type": "number", "minimum": 0 },
+          "impulse_falloff_start": { "type": "number", "minimum": 0, "maximum": 1 },
+          "impulse_falloff_end": { "type": "number", "minimum": 0, "maximum": 1 },
+          "critical_chance": { "type": "number", "minimum": 0, "maximum": 1 },
+          "critical_ratio": { "type": "number", "minimum": 0, "maximum": 10 },
+          "joint": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number" }
+          },
+          "gun": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number" }
+          },
+          "divergence": { "type": "number", "minimum": 0, "maximum": 180 },
+          "dispersion": { "type": "number", "minimum": 0, "maximum": 360 },
+          "dispersion_time": { "type": "integer", "minimum": 0, "maximum": 6000 },
+          "explosion_radius": { "type": "number", "minimum": 0 },
+          "explosion_damage": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "explosive": { "type": "integer", "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

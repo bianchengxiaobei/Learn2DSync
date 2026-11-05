@@ -1,0 +1,49 @@
+<rml>
+<head>
+    <title>NSYNC Client</title>
+    <style>
+        body {
+            display: block;
+            width: 100%;
+            height: 100%;
+            color: #e8eef7;
+            font-family: SpikeFont;
+            font-size: 18px;
+        }
+
+        #hud {
+            display: block;
+            position: absolute;
+            left: 18px;
+            top: 18px;
+            padding: 10px 14px;
+            background-color: #0a121c;
+            border: 1px solid #3a8fb7;
+            border-radius: 6px;
+            font-size: 19px;
+        }
+
+        #controls {
+            display: block;
+            position: absolute;
+            left: 18px;
+            bottom: 18px;
+            padding: 7px 10px;
+            background-color: #0a121c;
+            border-radius: 5px;
+            color: #9fb3c8;
+            font-size: 14px;
+        }
+
+        #status, #test-button {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">loading world...</div>
+    <div id="controls">A/D or arrows move | W/Space jump | LMB fire | R reload | Q weapon | Esc exit</div>
+    <p id="status"></p>
+    <button id="test-button">test</button>
+</body>
+</rml>

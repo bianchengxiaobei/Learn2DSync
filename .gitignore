@@ -1,0 +1,13 @@
+build/
+dist/
+README.original.md
+__pycache__/
+*.pyc
+*.obj
+reference/
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+config/client.settings.ini
