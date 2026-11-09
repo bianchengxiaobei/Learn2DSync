@@ -57,19 +57,29 @@ public:
             } else if (key == "bounds") {
                 ok = parse_bounds(map.bounds);
                 has_bounds = true;
+            } else if (key == "borders") {
+                ok = parse_border_list(map.borders);
             } else if (key == "solids") {
                 ok = parse_shape_list(map.solids);
             } else if (key == "platforms") {
                 ok = parse_shape_list(map.one_way_platforms);
+            } else if (key == "platform_shapes") {
+                ok = parse_platform_shapes(map.platform_shapes);
             } else if (key == "platform_hatchway") {
                 ok = parse_bool_list(map.platform_hatchway);
             } else if (key == "jump_pads") {
                 ok = parse_jump_pads(map.jump_pads);
             } else if (key == "objective") {
-                AABB objective;
-                ok = parse_rect(objective);
+                Objective objective;
+                ok = parse_objective(objective);
                 if (ok) {
                     map.objective = objective;
+                }
+            } else if (key == "control_points") {
+                ControlPointGenerator generator;
+                ok = parse_control_points(generator);
+                if (ok) {
+                    map.control_points = generator;
                 }
             } else if (key == "spawns") {
                 ok = parse_spawns(map.spawns);
@@ -78,6 +88,8 @@ public:
                 ok = parse_drop_spawns(map.drop_spawns);
             } else if (key == "drop_depots") {
                 ok = parse_drop_depots(map.drop_depots);
+            } else if (key == "supply_spawners") {
+                ok = parse_supply_spawners(map.supply_spawners);
             } else {
                 ok = skip_value(0);
             }
@@ -407,6 +419,304 @@ private:
         return true;
     }
 
+    bool parse_u16_field(std::uint16_t& value, std::uint16_t max_value) {
+        Fix32 number;
+        if (!parse_number(number)) {
+            return false;
+        }
+        const std::int32_t rounded = number.to_int_round();
+        if (rounded < 0 || rounded > max_value) {
+            return fail("objective tick count is out of range");
+        }
+        value = static_cast<std::uint16_t>(rounded);
+        return true;
+    }
+
+    bool parse_i16_field(std::int16_t& value) {
+        Fix32 number;
+        if (!parse_number(number)) {
+            return false;
+        }
+        const std::int32_t rounded = number.to_int_round();
+        if (rounded < 0 ||
+            rounded > std::numeric_limits<std::int16_t>::max()) {
+            return fail("objective score is out of range");
+        }
+        value = static_cast<std::int16_t>(rounded);
+        return true;
+    }
+
+    bool parse_u32_field(
+        std::uint32_t& value,
+        std::uint32_t max_value,
+        const char* message) {
+        Fix32 number;
+        if (!parse_number(number)) {
+            return false;
+        }
+        const std::int32_t rounded = number.to_int_round();
+        if (rounded < 0 ||
+            static_cast<std::uint32_t>(rounded) > max_value) {
+            return fail(message);
+        }
+        value = static_cast<std::uint32_t>(rounded);
+        return true;
+    }
+
+    bool parse_u8_field(
+        std::uint8_t& value,
+        std::uint8_t max_value,
+        const char* message) {
+        std::uint32_t parsed = 0;
+        if (!parse_u32_field(parsed, max_value, message)) {
+            return false;
+        }
+        value = static_cast<std::uint8_t>(parsed);
+        return true;
+    }
+
+    bool parse_objective(Objective& value) {
+        skip_whitespace();
+        if (!consume('{')) {
+            return parse_rect(value.area);
+        }
+        bool has_rect = false;
+        for (;;) {
+            std::string key;
+            if (!parse_string(key)) {
+                return false;
+            }
+            skip_whitespace();
+            if (!consume(':')) {
+                return fail("expected ':' after objective key");
+            }
+            skip_whitespace();
+            bool ok = true;
+            if (key == "rect") {
+                ok = parse_rect(value.area);
+                has_rect = ok;
+            } else if (key == "capture_ticks") {
+                ok = parse_u16_field(
+                    value.capture_ticks, kMapMaxObjectiveTicks);
+            } else if (key == "score_ticks") {
+                ok = parse_u16_field(
+                    value.score_ticks, kMapMaxObjectiveTicks);
+            } else if (key == "capture_score") {
+                ok = parse_i16_field(value.capture_score);
+            } else if (key == "hold_score") {
+                ok = parse_i16_field(value.hold_score);
+            } else {
+                ok = skip_value(0);
+            }
+            if (!ok) {
+                return false;
+            }
+            skip_whitespace();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or '}' in objective");
+            }
+            skip_whitespace();
+        }
+        if (!has_rect) {
+            return fail("objective object requires rect");
+        }
+        return true;
+    }
+
+    bool parse_control_point_def(ControlPointDef& value) {
+        skip_whitespace();
+        if (!consume('{')) {
+            return fail("expected control point def object");
+        }
+        bool has_dimensions = false;
+        for (;;) {
+            std::string key;
+            if (!parse_string(key)) {
+                return false;
+            }
+            skip_whitespace();
+            if (!consume(':')) {
+                return fail("expected ':' after control point def key");
+            }
+            skip_whitespace();
+            bool ok = true;
+            if (key == "dimensions") {
+                ok = parse_vec2(value.dimensions);
+                has_dimensions = ok;
+            } else if (key == "capture_ticks") {
+                ok = parse_u16_field(
+                    value.capture_ticks, kMapMaxObjectiveTicks);
+            } else if (key == "score_ticks") {
+                ok = parse_u16_field(
+                    value.score_ticks, kMapMaxObjectiveTicks);
+            } else if (key == "capture_score") {
+                ok = parse_i16_field(value.capture_score);
+            } else if (key == "hold_score") {
+                ok = parse_i16_field(value.hold_score);
+            } else {
+                ok = skip_value(0);
+            }
+            if (!ok) {
+                return false;
+            }
+            skip_whitespace();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or '}' in control point def");
+            }
+            skip_whitespace();
+        }
+        if (!has_dimensions) {
+            return fail("control point def requires dimensions");
+        }
+        if (value.dimensions.x <= Fix32::zero() ||
+            value.dimensions.y <= Fix32::zero()) {
+            return fail("control point dimensions must be positive");
+        }
+        return true;
+    }
+
+    bool parse_control_point_entries(std::vector<Vec2>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected control point entries array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxControlPointEntries) {
+                return fail("too many control point entries");
+            }
+            Vec2 entry;
+            if (!parse_vec2(entry)) {
+                return false;
+            }
+            value.push_back(entry);
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in control point entries");
+            }
+            skip_whitespace();
+        }
+    }
+
+    bool parse_control_points(ControlPointGenerator& value) {
+        skip_whitespace();
+        if (!consume('{')) {
+            return fail("expected control_points object");
+        }
+        bool has_points = false;
+        bool has_entries = false;
+        for (;;) {
+            std::string key;
+            if (!parse_string(key)) {
+                return false;
+            }
+            skip_whitespace();
+            if (!consume(':')) {
+                return fail("expected ':' after control_points key");
+            }
+            skip_whitespace();
+            bool ok = true;
+            if (key == "update_interval") {
+                ok = parse_u16_field(
+                    value.update_interval, kMapMaxControlPointInterval);
+                if (ok && value.update_interval == 0) {
+                    ok = fail("control point update interval must be positive");
+                }
+            } else if (key == "start_tick") {
+                ok = parse_u32_field(
+                    value.start_tick,
+                    std::numeric_limits<std::uint32_t>::max(),
+                    "control point start tick is out of range");
+            } else if (key == "min_interval") {
+                ok = parse_u32_field(
+                    value.min_interval,
+                    kMapMaxControlPointInterval,
+                    "control point min interval is out of range");
+            } else if (key == "max_interval") {
+                ok = parse_u32_field(
+                    value.max_interval,
+                    kMapMaxControlPointInterval,
+                    "control point max interval is out of range");
+            } else if (key == "instance_limit") {
+                ok = parse_u8_field(
+                    value.instance_limit,
+                    static_cast<std::uint8_t>(kMapMaxControlPointEntries),
+                    "control point instance limit is out of range");
+            } else if (key == "capture_group_size") {
+                ok = parse_u8_field(
+                    value.capture_group_size,
+                    std::numeric_limits<std::uint8_t>::max(),
+                    "control point capture group size is out of range");
+            } else if (key == "points") {
+                ok = parse_control_point_defs(value.points);
+                has_points = ok;
+            } else if (key == "entries") {
+                ok = parse_control_point_entries(value.entries);
+                has_entries = ok;
+            } else {
+                ok = skip_value(0);
+            }
+            if (!ok) {
+                return false;
+            }
+            skip_whitespace();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or '}' in control_points");
+            }
+            skip_whitespace();
+        }
+        if (!has_points || !has_entries) {
+            return fail("control_points requires points and entries");
+        }
+        return true;
+    }
+
+    bool parse_control_point_defs(std::vector<ControlPointDef>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected control point defs array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxControlPointDefs) {
+                return fail("too many control point defs");
+            }
+            ControlPointDef def;
+            if (!parse_control_point_def(def)) {
+                return false;
+            }
+            value.push_back(def);
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in control point defs");
+            }
+            skip_whitespace();
+        }
+    }
+
     bool parse_shape_list(std::vector<AABB>& value) {
         skip_whitespace();
         if (!consume('[')) {
@@ -432,6 +742,118 @@ private:
             }
             if (!consume(',')) {
                 return fail("expected ',' or ']' in shape array");
+            }
+            skip_whitespace();
+        }
+    }
+
+    bool parse_border_list(std::vector<Segment>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected border array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxShapes) {
+                return fail("too many map borders");
+            }
+            Segment border;
+            if (!parse_segment(border)) {
+                return false;
+            }
+            value.push_back(border);
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in border array");
+            }
+            skip_whitespace();
+        }
+    }
+
+    bool parse_segment(Segment& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected segment array");
+        }
+        if (!parse_number(value.a.x)) {
+            return false;
+        }
+        skip_whitespace();
+        if (!consume(',')) {
+            return fail("expected ',' in segment");
+        }
+        if (!parse_number(value.a.y)) {
+            return false;
+        }
+        skip_whitespace();
+        if (!consume(',')) {
+            return fail("expected ',' in segment");
+        }
+        if (!parse_number(value.b.x)) {
+            return false;
+        }
+        skip_whitespace();
+        if (!consume(',')) {
+            return fail("expected ',' in segment");
+        }
+        if (!parse_number(value.b.y)) {
+            return false;
+        }
+        skip_whitespace();
+        if (!consume(']')) {
+            return fail("expected ']' after segment");
+        }
+        return true;
+    }
+
+    bool parse_platform_shapes(std::vector<std::array<Vec2, 4>>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected platform shape array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxShapes) {
+                return fail("too many map platform shapes");
+            }
+            skip_whitespace();
+            if (!consume('[')) {
+                return fail("expected platform shape quad");
+            }
+            std::array<Vec2, 4> shape{};
+            for (std::size_t index = 0; index < shape.size(); ++index) {
+                if (!parse_vec2(shape[index])) {
+                    return false;
+                }
+                if (index + 1 < shape.size()) {
+                    skip_whitespace();
+                    if (!consume(',')) {
+                        return fail("expected ',' in platform shape");
+                    }
+                }
+            }
+            skip_whitespace();
+            if (!consume(']')) {
+                return fail("expected ']' after platform shape");
+            }
+            value.push_back(shape);
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in platform shape array");
             }
             skip_whitespace();
         }
@@ -773,6 +1195,166 @@ private:
         }
     }
 
+    bool parse_supply_entries(std::vector<Vec2>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected supply entries array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxSupplyEntries) {
+                return fail("too many supply entries");
+            }
+            Vec2 entry;
+            if (!parse_vec2(entry)) {
+                return false;
+            }
+            value.push_back(entry);
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in supply entries");
+            }
+            skip_whitespace();
+        }
+    }
+
+    bool parse_supply_list(std::vector<std::string>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected supply id array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxSupplyList) {
+                return fail("too many supply ids");
+            }
+            std::string item;
+            if (!parse_drop_id(item)) {
+                return false;
+            }
+            value.push_back(std::move(item));
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in supply id array");
+            }
+            skip_whitespace();
+        }
+    }
+
+    bool parse_supply_spawner(SupplySpawner& value) {
+        skip_whitespace();
+        if (!consume('{')) {
+            return fail("expected supply spawner object");
+        }
+        bool has_supplies = false;
+        bool has_entries = false;
+        for (;;) {
+            std::string key;
+            if (!parse_string(key)) {
+                return false;
+            }
+            skip_whitespace();
+            if (!consume(':')) {
+                return fail("expected ':' after supply spawner key");
+            }
+            skip_whitespace();
+
+            bool ok = true;
+            if (key == "supplies") {
+                ok = parse_supply_list(value.supplies);
+                has_supplies = ok;
+            } else if (key == "entries") {
+                ok = parse_supply_entries(value.entries);
+                has_entries = ok;
+            } else if (key == "start_tick") {
+                ok = parse_u32_field(
+                    value.start_tick,
+                    std::numeric_limits<std::uint32_t>::max(),
+                    "supply start tick is out of range");
+            } else if (key == "min_interval") {
+                ok = parse_u16_field(
+                    value.min_interval, kMapMaxSupplyInterval);
+            } else if (key == "max_interval") {
+                ok = parse_u16_field(
+                    value.max_interval, kMapMaxSupplyInterval);
+            } else {
+                ok = skip_value(0);
+            }
+            if (!ok) {
+                return false;
+            }
+
+            skip_whitespace();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or '}' in supply spawner");
+            }
+            skip_whitespace();
+        }
+        if (!has_supplies || !has_entries || value.supplies.empty() ||
+            value.entries.empty()) {
+            return fail("supply spawner requires supplies and entries");
+        }
+        if (value.supplies.size() > kMapMaxSupplyList) {
+            return fail("supply spawner has too many supplies");
+        }
+        for (const std::string& id : value.supplies) {
+            if (id.empty() || id.size() > kMapMaxDropIdLength) {
+                return fail("supply spawner supply id is invalid");
+            }
+        }
+        if (value.min_interval > value.max_interval) {
+            return fail("supply spawner interval is invalid");
+        }
+        return true;
+    }
+
+    bool parse_supply_spawners(std::vector<SupplySpawner>& value) {
+        skip_whitespace();
+        if (!consume('[')) {
+            return fail("expected supply spawners array");
+        }
+        value.clear();
+        skip_whitespace();
+        if (consume(']')) {
+            return true;
+        }
+        for (;;) {
+            if (value.size() >= kMapMaxSupplySpawners) {
+                return fail("too many supply spawners");
+            }
+            SupplySpawner spawner;
+            if (!parse_supply_spawner(spawner)) {
+                return false;
+            }
+            value.push_back(std::move(spawner));
+            skip_whitespace();
+            if (consume(']')) {
+                return true;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or ']' in supply spawners array");
+            }
+            skip_whitespace();
+        }
+    }
+
     bool skip_value(std::size_t depth) {
         if (depth > kMaxJsonDepth) {
             return fail("json nesting too deep");
@@ -921,6 +1503,17 @@ Map Map::default_arena() {
     return map;
 }
 
+AABB ControlPointGenerator::area(
+    std::size_t def_index,
+    std::size_t entry_index) const {
+    if (def_index >= points.size() || entry_index >= entries.size()) {
+        return AABB{};
+    }
+    const Vec2 half = points[def_index].dimensions *
+        Fix32::from_ratio(1, 2);
+    return AABB::from_center(entries[entry_index], half);
+}
+
 bool Map::valid(std::string* error) const {
     const auto fail = [&](const char* message) {
         if (error) {
@@ -935,10 +1528,16 @@ bool Map::valid(std::string* error) const {
     if (bounds.min.x >= bounds.max.x || bounds.min.y >= bounds.max.y) {
         return fail("map bounds are invalid");
     }
-    if (solids.size() > kMapMaxShapes ||
+    if (borders.size() > kMapMaxShapes ||
+        solids.size() > kMapMaxShapes ||
         one_way_platforms.size() > kMapMaxShapes ||
         jump_pads.size() > kMapMaxShapes) {
         return fail("map has too many shapes");
+    }
+    for (const Segment& border : borders) {
+        if (border.a == border.b) {
+            return fail("map border is degenerate");
+        }
     }
     for (const AABB& shape : solids) {
         if (shape.min.x >= shape.max.x || shape.min.y >= shape.max.y) {
@@ -954,6 +1553,10 @@ bool Map::valid(std::string* error) const {
         platform_hatchway.size() != one_way_platforms.size()) {
         return fail("map platform hatchway count mismatch");
     }
+    if (!platform_shapes.empty() &&
+        platform_shapes.size() != one_way_platforms.size()) {
+        return fail("map platform shape count mismatch");
+    }
     for (std::uint8_t hatchway : platform_hatchway) {
         if (hatchway > 1) {
             return fail("map platform hatchway flag is invalid");
@@ -966,10 +1569,58 @@ bool Map::valid(std::string* error) const {
             return fail("map jump pad is invalid");
         }
     }
-    if (objective.has_value() &&
-        (objective->min.x >= objective->max.x ||
-         objective->min.y >= objective->max.y)) {
-        return fail("map objective is invalid");
+    if (objective.has_value()) {
+        if (objective->area.min.x >= objective->area.max.x ||
+            objective->area.min.y >= objective->area.max.y) {
+            return fail("map objective is invalid");
+        }
+        if (objective->capture_ticks == 0 ||
+            objective->capture_ticks > kMapMaxObjectiveTicks ||
+            objective->score_ticks > kMapMaxObjectiveTicks) {
+            return fail("map objective tick count is invalid");
+        }
+        if (objective->capture_score < 0 || objective->hold_score < 0) {
+            return fail("map objective score is invalid");
+        }
+    }
+    if (control_points.has_value()) {
+        const ControlPointGenerator& generator = *control_points;
+        if (generator.points.empty() || generator.entries.empty()) {
+            return fail("control points require defs and entries");
+        }
+        if (generator.points.size() > kMapMaxControlPointDefs ||
+            generator.entries.size() > kMapMaxControlPointEntries) {
+            return fail("map has too many control points");
+        }
+        if (generator.update_interval == 0 ||
+            generator.update_interval > kMapMaxControlPointInterval) {
+            return fail("control point update interval is invalid");
+        }
+        if (generator.min_interval > generator.max_interval ||
+            generator.max_interval > kMapMaxControlPointInterval) {
+            return fail("control point respawn interval is invalid");
+        }
+        if (generator.instance_limit == 0 ||
+            generator.instance_limit > generator.entries.size()) {
+            return fail("control point instance limit is invalid");
+        }
+        for (const ControlPointDef& def : generator.points) {
+            if (def.dimensions.x <= Fix32::zero() ||
+                def.dimensions.y <= Fix32::zero() ||
+                def.capture_ticks == 0 ||
+                def.capture_ticks > kMapMaxObjectiveTicks ||
+                def.score_ticks > kMapMaxObjectiveTicks) {
+                return fail("map control point def is invalid");
+            }
+            if (def.capture_score < 0 || def.hold_score < 0) {
+                return fail("map control point score is invalid");
+            }
+        }
+        for (const Vec2& entry : generator.entries) {
+            if (!bounds.contains(entry)) {
+                return fail("map control point entry is outside bounds");
+            }
+        }
     }
     if (drop_spawns.size() > kMapMaxDropSpawns ||
         drop_depots.size() > kMapMaxDropDepots) {
@@ -1007,6 +1658,31 @@ bool Map::valid(std::string* error) const {
             if (drop_id.empty() ||
                 drop_id.size() > kMapMaxDropIdLength) {
                 return fail("map drop depot accepted drop id is invalid");
+            }
+        }
+    }
+    if (supply_spawners.size() > kMapMaxSupplySpawners) {
+        return fail("map has too many supply spawners");
+    }
+    for (const SupplySpawner& spawner : supply_spawners) {
+        if (spawner.supplies.empty() ||
+            spawner.supplies.size() > kMapMaxSupplyList ||
+            spawner.entries.empty() ||
+            spawner.entries.size() > kMapMaxSupplyEntries) {
+            return fail("map supply spawner definition is invalid");
+        }
+        for (const std::string& id : spawner.supplies) {
+            if (id.empty() || id.size() > kMapMaxDropIdLength) {
+                return fail("map supply spawner id is invalid");
+            }
+        }
+        if (spawner.min_interval > spawner.max_interval ||
+            spawner.max_interval > kMapMaxSupplyInterval) {
+            return fail("map supply spawner interval is invalid");
+        }
+        for (const Vec2& entry : spawner.entries) {
+            if (!bounds.contains(entry)) {
+                return fail("map supply spawner entry is outside bounds");
             }
         }
     }
@@ -1055,7 +1731,33 @@ std::vector<std::uint8_t> encode_map_bin(const Map& map) {
     write_box(map.bounds);
     writer.u8(map.objective.has_value() ? 1 : 0);
     if (map.objective.has_value()) {
-        write_box(*map.objective);
+        write_box(map.objective->area);
+        writer.u16(map.objective->capture_ticks);
+        writer.u16(map.objective->score_ticks);
+        writer.i16(map.objective->capture_score);
+        writer.i16(map.objective->hold_score);
+    }
+    writer.u8(map.control_points.has_value() ? 1 : 0);
+    if (map.control_points.has_value()) {
+        const ControlPointGenerator& generator = *map.control_points;
+        writer.u16(generator.update_interval);
+        writer.u32(generator.start_tick);
+        writer.u32(generator.min_interval);
+        writer.u32(generator.max_interval);
+        writer.u8(generator.instance_limit);
+        writer.u8(generator.capture_group_size);
+        writer.u16(static_cast<std::uint16_t>(generator.points.size()));
+        for (const ControlPointDef& def : generator.points) {
+            write_vec(def.dimensions);
+            writer.u16(def.capture_ticks);
+            writer.u16(def.score_ticks);
+            writer.i16(def.capture_score);
+            writer.i16(def.hold_score);
+        }
+        writer.u16(static_cast<std::uint16_t>(generator.entries.size()));
+        for (Vec2 entry : generator.entries) {
+            write_vec(entry);
+        }
     }
     writer.u32(static_cast<std::uint32_t>(map.solids.size()));
     for (const AABB& box : map.solids) {
@@ -1092,6 +1794,32 @@ std::vector<std::uint8_t> encode_map_bin(const Map& map) {
         for (const std::string& drop_id : depot.accepted_drops) {
             writer.u16(static_cast<std::uint16_t>(drop_id.size()));
             writer.bytes(drop_id.data(), drop_id.size());
+        }
+    }
+    writer.u32(static_cast<std::uint32_t>(map.supply_spawners.size()));
+    for (const SupplySpawner& spawner : map.supply_spawners) {
+        writer.u32(spawner.start_tick);
+        writer.u16(spawner.min_interval);
+        writer.u16(spawner.max_interval);
+        writer.u8(static_cast<std::uint8_t>(spawner.supplies.size()));
+        for (const std::string& supply_id : spawner.supplies) {
+            writer.u16(static_cast<std::uint16_t>(supply_id.size()));
+            writer.bytes(supply_id.data(), supply_id.size());
+        }
+        writer.u8(static_cast<std::uint8_t>(spawner.entries.size()));
+        for (Vec2 entry : spawner.entries) {
+            write_vec(entry);
+        }
+    }
+    writer.u32(static_cast<std::uint32_t>(map.borders.size()));
+    for (const Segment& border : map.borders) {
+        write_vec(border.a);
+        write_vec(border.b);
+    }
+    writer.u32(static_cast<std::uint32_t>(map.platform_shapes.size()));
+    for (const std::array<Vec2, 4>& shape : map.platform_shapes) {
+        for (Vec2 point : shape) {
+            write_vec(point);
         }
     }
     return writer.data();
@@ -1161,11 +1889,61 @@ bool decode_map_bin(
         return fail("invalid map binary objective");
     }
     if (has_objective != 0) {
-        AABB objective;
-        if (!read_box(objective)) {
+        Objective objective;
+        if (!read_box(objective.area)) {
             return fail("truncated map binary objective");
         }
+        if (version >= 6) {
+            if (!reader.u16(objective.capture_ticks) ||
+                !reader.u16(objective.score_ticks) ||
+                !reader.i16(objective.capture_score) ||
+                !reader.i16(objective.hold_score)) {
+                return fail("truncated map binary objective settings");
+            }
+        }
         decoded.objective = objective;
+    }
+    if (version >= 7) {
+        std::uint8_t has_control_points = 0;
+        if (!reader.u8(has_control_points) || has_control_points > 1) {
+            return fail("invalid map binary control points");
+        }
+        if (has_control_points != 0) {
+            ControlPointGenerator generator;
+            std::uint16_t def_count = 0;
+            std::uint16_t entry_count = 0;
+            if (!reader.u16(generator.update_interval) ||
+                !reader.u32(generator.start_tick) ||
+                !reader.u32(generator.min_interval) ||
+                !reader.u32(generator.max_interval) ||
+                !reader.u8(generator.instance_limit) ||
+                !reader.u8(generator.capture_group_size) ||
+                !reader.u16(def_count) ||
+                def_count > kMapMaxControlPointDefs) {
+                return fail("truncated map binary control point header");
+            }
+            generator.points.resize(def_count);
+            for (ControlPointDef& def : generator.points) {
+                if (!read_vec(def.dimensions) ||
+                    !reader.u16(def.capture_ticks) ||
+                    !reader.u16(def.score_ticks) ||
+                    !reader.i16(def.capture_score) ||
+                    !reader.i16(def.hold_score)) {
+                    return fail("truncated map binary control point def");
+                }
+            }
+            if (!reader.u16(entry_count) ||
+                entry_count > kMapMaxControlPointEntries) {
+                return fail("invalid map binary control point entry count");
+            }
+            generator.entries.resize(entry_count);
+            for (Vec2& entry : generator.entries) {
+                if (!read_vec(entry)) {
+                    return fail("truncated map binary control point entry");
+                }
+            }
+            decoded.control_points = std::move(generator);
+        }
     }
 
     std::uint32_t solid_count = 0;
@@ -1276,6 +2054,80 @@ bool decode_map_bin(
         }
     }
 
+    if (version >= 8) {
+        std::uint32_t spawner_count = 0;
+        if (!reader.u32(spawner_count) ||
+            spawner_count > kMapMaxSupplySpawners) {
+            return fail("invalid map binary supply spawner count");
+        }
+        decoded.supply_spawners.resize(spawner_count);
+        for (SupplySpawner& spawner : decoded.supply_spawners) {
+            std::uint8_t supply_count = 0;
+            std::uint8_t entry_count = 0;
+            if (!reader.u32(spawner.start_tick) ||
+                !reader.u16(spawner.min_interval) ||
+                !reader.u16(spawner.max_interval) ||
+                !reader.u8(supply_count) ||
+                supply_count == 0 || supply_count > kMapMaxSupplyList) {
+                return fail("truncated map binary supply spawner");
+            }
+            spawner.supplies.resize(supply_count);
+            for (std::string& supply_id : spawner.supplies) {
+                std::uint16_t supply_id_size = 0;
+                if (!reader.u16(supply_id_size) ||
+                    supply_id_size == 0 ||
+                    supply_id_size > kMapMaxDropIdLength ||
+                    reader.remaining() < supply_id_size) {
+                    return fail("truncated map binary supply spawner id");
+                }
+                supply_id.resize(supply_id_size);
+                if (!reader.bytes(
+                        supply_id.data(),
+                        supply_id.size())) {
+                    return fail("truncated map binary supply spawner id");
+                }
+            }
+            if (!reader.u8(entry_count) || entry_count == 0 ||
+                entry_count > kMapMaxSupplyEntries) {
+                return fail("truncated map binary supply spawner entries");
+            }
+            spawner.entries.resize(entry_count);
+            for (Vec2& entry : spawner.entries) {
+                if (!read_vec(entry)) {
+                    return fail("truncated map binary supply spawner entry");
+                }
+            }
+        }
+    }
+
+    if (version >= 9) {
+        std::uint32_t border_count = 0;
+        if (!reader.u32(border_count) || border_count > kMapMaxShapes) {
+            return fail("invalid map binary border count");
+        }
+        decoded.borders.resize(border_count);
+        for (Segment& border : decoded.borders) {
+            if (!read_vec(border.a) || !read_vec(border.b)) {
+                return fail("truncated map binary border");
+            }
+        }
+    }
+
+    if (version >= 10) {
+        std::uint32_t shape_count = 0;
+        if (!reader.u32(shape_count) || shape_count > kMapMaxShapes) {
+            return fail("invalid map binary platform shape count");
+        }
+        decoded.platform_shapes.resize(shape_count);
+        for (std::array<Vec2, 4>& shape : decoded.platform_shapes) {
+            for (Vec2& point : shape) {
+                if (!read_vec(point)) {
+                    return fail("truncated map binary platform shape");
+                }
+            }
+        }
+    }
+
     if (reader.remaining() != 0) {
         return fail("trailing map binary data");
     }
@@ -1354,7 +2206,33 @@ std::uint64_t map_fingerprint(const Map& map) {
     write_box(map.bounds);
     writer.u8(map.objective.has_value() ? 1 : 0);
     if (map.objective.has_value()) {
-        write_box(*map.objective);
+        write_box(map.objective->area);
+        writer.u16(map.objective->capture_ticks);
+        writer.u16(map.objective->score_ticks);
+        writer.i16(map.objective->capture_score);
+        writer.i16(map.objective->hold_score);
+    }
+    writer.u8(map.control_points.has_value() ? 1 : 0);
+    if (map.control_points.has_value()) {
+        const ControlPointGenerator& generator = *map.control_points;
+        writer.u16(generator.update_interval);
+        writer.u32(generator.start_tick);
+        writer.u32(generator.min_interval);
+        writer.u32(generator.max_interval);
+        writer.u8(generator.instance_limit);
+        writer.u8(generator.capture_group_size);
+        writer.u16(static_cast<std::uint16_t>(generator.points.size()));
+        for (const ControlPointDef& def : generator.points) {
+            write_vec(def.dimensions);
+            writer.u16(def.capture_ticks);
+            writer.u16(def.score_ticks);
+            writer.i16(def.capture_score);
+            writer.i16(def.hold_score);
+        }
+        writer.u16(static_cast<std::uint16_t>(generator.entries.size()));
+        for (Vec2 entry : generator.entries) {
+            write_vec(entry);
+        }
     }
     writer.u32(static_cast<std::uint32_t>(map.solids.size()));
     for (const AABB& box : map.solids) {
@@ -1391,6 +2269,32 @@ std::uint64_t map_fingerprint(const Map& map) {
         for (const std::string& drop_id : depot.accepted_drops) {
             writer.u16(static_cast<std::uint16_t>(drop_id.size()));
             writer.bytes(drop_id.data(), drop_id.size());
+        }
+    }
+    writer.u32(static_cast<std::uint32_t>(map.supply_spawners.size()));
+    for (const SupplySpawner& spawner : map.supply_spawners) {
+        writer.u32(spawner.start_tick);
+        writer.u16(spawner.min_interval);
+        writer.u16(spawner.max_interval);
+        writer.u8(static_cast<std::uint8_t>(spawner.supplies.size()));
+        for (const std::string& supply_id : spawner.supplies) {
+            writer.u16(static_cast<std::uint16_t>(supply_id.size()));
+            writer.bytes(supply_id.data(), supply_id.size());
+        }
+        writer.u8(static_cast<std::uint8_t>(spawner.entries.size()));
+        for (Vec2 entry : spawner.entries) {
+            write_vec(entry);
+        }
+    }
+    writer.u32(static_cast<std::uint32_t>(map.borders.size()));
+    for (const Segment& border : map.borders) {
+        write_vec(border.a);
+        write_vec(border.b);
+    }
+    writer.u32(static_cast<std::uint32_t>(map.platform_shapes.size()));
+    for (const std::array<Vec2, 4>& shape : map.platform_shapes) {
+        for (Vec2 point : shape) {
+            write_vec(point);
         }
     }
     return hash64_bytes(writer.data().data(), writer.data().size());

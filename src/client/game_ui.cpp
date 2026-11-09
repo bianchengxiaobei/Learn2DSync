@@ -246,6 +246,7 @@ bool GameUi::initialize(
     hud_weapon_ = find("hud-weapon");
     hud_ammo_ = find("hud-ammo");
     hud_vitals_ = find("hud-vitals");
+    hud_buff_ = find("hud-buff");
     hud_death_ = find("hud-death");
     hud_death_timer_ = find("hud-death-timer");
     hud_net_ = find("hud-net");
@@ -396,6 +397,7 @@ void GameUi::shutdown() {
     hud_weapon_ = nullptr;
     hud_ammo_ = nullptr;
     hud_vitals_ = nullptr;
+    hud_buff_ = nullptr;
     hud_death_ = nullptr;
     hud_death_timer_ = nullptr;
     hud_net_ = nullptr;
@@ -786,10 +788,7 @@ void GameUi::update_match(const UiMatchModel& model) {
     const bool crystal_mode = model.mode == 2;
     set_visible(hud_objective_, control_mode || crystal_mode);
     if (control_mode && hud_objective_fill_ != nullptr) {
-        const bool held = model.objective_owner != 0;
-        const int value = held
-            ? model.objective_score_percent
-            : model.objective_progress_percent;
+        const int value = model.objective_progress_percent;
         std::string label = tr("hud.neutral");
         std::string color = "#7d93a6";
         if (model.objective_owner == 1) {
@@ -896,6 +895,33 @@ void GameUi::update_match(const UiMatchModel& model) {
                 ? 100
                 : gadget.cooldown_percent;
             fill->SetProperty("width", std::to_string(width) + "%");
+        }
+    }
+    if (hud_buff_ != nullptr) {
+        const bool shocked =
+            model.local_alive && model.local_shock_ticks > 0;
+        hud_buff_->SetClass("shock", shocked);
+        if (shocked) {
+            set_visible(hud_buff_, true);
+            set_text(
+                hud_buff_,
+                tr("hud.shocked") + " " +
+                    std::to_string(
+                        (model.local_shock_ticks + 59) / 60) +
+                    "S");
+        } else if (model.local_damage_bonus_ticks > 0) {
+            set_visible(hud_buff_, true);
+            set_text(
+                hud_buff_,
+                "X2 " +
+                    std::to_string(
+                        (model.local_damage_bonus_ticks + 59) / 60) +
+                    "S");
+        } else if (model.local_supply_heal_ticks > 0) {
+            set_visible(hud_buff_, true);
+            set_text(hud_buff_, "+HP");
+        } else {
+            set_visible(hud_buff_, false);
         }
     }
     if (hud_vitals_ != nullptr) {

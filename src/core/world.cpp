@@ -81,6 +81,20 @@ std::uint16_t projectile_hit_damage(
 void World::set_map(const Map& map) {
     map_ = map;
     collision_solids_ = map_.solids;
+    projectile_solids_.clear();
+    projectile_platform_segments_.clear();
+    if (map_.borders.empty()) {
+        projectile_solids_ = map_.solids;
+    }
+    const bool has_platform_shapes = !map_.platform_shapes.empty();
+    if (has_platform_shapes) {
+        for (const std::array<Vec2, 4>& shape : map_.platform_shapes) {
+            for (std::size_t edge = 0; edge < shape.size(); ++edge) {
+                projectile_platform_segments_.push_back(Segment{
+                    shape[edge], shape[(edge + 1) % shape.size()]});
+            }
+        }
+    }
     for (std::size_t index = 0;
          index < map_.one_way_platforms.size();
          ++index) {
@@ -89,9 +103,15 @@ void World::set_map(const Map& map) {
             map_.platform_hatchway[index] != 0;
         if (!hatchway) {
             collision_solids_.push_back(map_.one_way_platforms[index]);
+            if (!has_platform_shapes) {
+                projectile_solids_.push_back(map_.one_way_platforms[index]);
+            }
         }
     }
     clear_drops();
+    rebuild_control_point_config();
+    reset_control_points();
+    reset_supplies();
 }
 
 World::World() {
@@ -115,17 +135,15 @@ void World::reset(std::uint64_t seed, int player_count) {
     scores_ = {};
     match_ticks_ = match_duration_;
     winner_ = 0;
-    objective_owner_ = kObjectiveNeutral;
-    objective_capturing_team_ = kObjectiveNeutral;
-    objective_progress_ = 0;
-    objective_score_ticks_ = 0;
     player_count_ = player_count;
     rng_ = Pcg32(seed);
+    reset_control_points();
 
     for (int slot = 0; slot < player_count_; ++slot) {
         spawn_player(static_cast<std::uint8_t>(slot));
     }
     spawn_drops_from_map();
+    reset_supplies();
 }
 
 void World::set_bot_slots(std::uint16_t mask) {
@@ -147,10 +165,7 @@ void World::set_match_rules(
 
 void World::set_game_mode(GameMode mode) {
     game_mode_ = mode;
-    objective_owner_ = kObjectiveNeutral;
-    objective_capturing_team_ = kObjectiveNeutral;
-    objective_progress_ = 0;
-    objective_score_ticks_ = 0;
+    reset_control_points();
     players_.for_each([](Player& player) {
         player.carried_drops = 0;
         player.depot_hold_ticks = 0;
@@ -255,6 +270,7 @@ void World::step(const InputFrame& input) {
     players_.for_each([&](Player& player) { update_player(player); });
     update_projectiles();
     update_drops();
+    update_supplies();
     update_match_state();
     ++tick_;
 }
@@ -282,16 +298,49 @@ PlayerCommand World::make_bot_command(const Player& bot) const {
     Vec2 aim = bot.aim;
     Vec2 movement_target = target == nullptr ? bot.position : target->position;
     const bool control_objective =
-        game_mode_ == GameMode::Control && map_.objective.has_value();
+        game_mode_ == GameMode::Control && control_points_enabled_;
     bool has_move_target = false;
     if (control_objective) {
-        const Vec2 center = map_.objective->center();
-        if (target == nullptr || !map_.objective->contains(bot.position)) {
-            movement_target = center;
+        const ControlPointState* best_point = nullptr;
+        Fix32 best_distance =
+            Fix32::from_raw(std::numeric_limits<std::int32_t>::max());
+        bool best_owned = false;
+        const std::uint8_t own_team =
+            static_cast<std::uint8_t>(bot.team + 1U);
+        for (const ControlPointState& point : control_points_) {
+            const AABB area = control_point_area(point);
+            const Vec2 center = area.center();
+            const Vec2 delta = center - bot.position;
+            const Fix32 distance = delta.length_sq();
+            const bool owned = point_owner(point) == own_team;
+            if (best_point == nullptr ||
+                (best_owned && !owned) ||
+                (owned == best_owned && distance < best_distance)) {
+                best_point = &point;
+                best_distance = distance;
+                best_owned = owned;
+            }
         }
-        has_move_target = true;
-        if (target == nullptr) {
-            aim = (center - bot.position).normalized();
+        if (best_point != nullptr) {
+            const AABB area = control_point_area(*best_point);
+            const Vec2 center = area.center();
+            if (target == nullptr || !area.contains(bot.position)) {
+                movement_target = center;
+            }
+            has_move_target = true;
+            if (target == nullptr) {
+                aim = (center - bot.position).normalized();
+            }
+        } else if (map_.objective.has_value()) {
+            const Vec2 center = map_.objective->area.center();
+            if (target == nullptr ||
+                !map_.objective->area.contains(bot.position)) {
+                movement_target = center;
+            }
+            has_move_target = true;
+            if (target == nullptr) {
+                aim = (center - bot.position).normalized();
+            }
         }
     } else if (game_mode_ == GameMode::Crystal) {
         const DropDepot* home_depot = nullptr;
@@ -375,6 +424,48 @@ PlayerCommand World::make_bot_command(const Player& bot) const {
         }
         if (target == nullptr && has_move_target) {
             aim = (movement_target - bot.position).normalized();
+        }
+    }
+
+    if (bot.alive != 0 && !supplies_.empty()) {
+        const HeroStats& hero =
+            hero_stats(static_cast<HeroType>(bot.hero));
+        const Fix32 max_health = Fix32::from_int(hero.health);
+        const Fix32 health_ratio = max_health > Fix32::zero()
+            ? bot.health / max_health
+            : Fix32::zero();
+        const SupplyInstance* supply_target = nullptr;
+        Fix32 supply_distance =
+            Fix32::from_raw(std::numeric_limits<std::int32_t>::max());
+        const Fix32 nearby = Fix32::from_int(20 * 20);
+        for (const SupplyInstance& supply : supplies_) {
+            const SupplyStats& stats = content().supply(supply.type);
+            const Fix32 distance =
+                (supply.position - bot.position).length_sq();
+            if (stats.kind == SupplyKind::Health) {
+                if (health_ratio >= Fix32::from_ratio(6, 10) &&
+                    (health_ratio >= Fix32::from_ratio(9, 10) ||
+                     distance > nearby)) {
+                    continue;
+                }
+            } else if (stats.kind == SupplyKind::Damage) {
+                if (bot.damage_bonus_ticks > 0 || distance > nearby) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            if (supply_target == nullptr || distance < supply_distance) {
+                supply_target = &supply;
+                supply_distance = distance;
+            }
+        }
+        if (supply_target != nullptr) {
+            movement_target = supply_target->position;
+            has_move_target = true;
+            if (target == nullptr) {
+                aim = (movement_target - bot.position).normalized();
+            }
         }
     }
 
@@ -494,7 +585,7 @@ void World::update_player(Player& player) {
             }
             const GadgetStats& candidate = hero_gadget_stats(
                 static_cast<HeroType>(player.hero), slot);
-            if (candidate.heal > 0) {
+            if (candidate.heal > 0 || candidate.heal_percent > 0) {
                 heal_gadget = &candidate;
                 break;
             }
@@ -506,12 +597,44 @@ void World::update_player(Player& player) {
             --player.heal_interval;
         }
         if (player.heal_interval == 0) {
+            const Fix32 max_health = Fix32::from_int(
+                hero_stats(static_cast<HeroType>(player.hero)).health);
+            const Fix32 amount = heal_gadget->heal_percent > 0
+                ? max_health * Fix32::from_ratio(
+                      static_cast<std::int32_t>(heal_gadget->heal_percent),
+                      100)
+                : Fix32::from_int(heal_gadget->heal);
             player.health = Fix32::min(
-                Fix32::from_int(hero_stats(static_cast<HeroType>(player.hero)).health),
-                player.health + Fix32::from_int(heal_gadget->heal));
+                max_health,
+                player.health + amount);
             player.heal_interval = heal_gadget->effect_ticks;
         }
         --player.heal_ticks;
+    }
+    if (player.supply_heal_ticks > 0) {
+        if (player.supply_heal_interval > 0) {
+            --player.supply_heal_interval;
+        }
+        if (player.supply_heal_interval == 0) {
+            const Fix32 max_health = Fix32::from_int(
+                hero_stats(static_cast<HeroType>(player.hero)).health);
+            player.health = Fix32::min(
+                max_health,
+                player.health +
+                    Fix32::from_int(player.supply_heal_amount));
+            player.supply_heal_interval = player.supply_heal_period;
+        }
+        --player.supply_heal_ticks;
+        if (player.health >= Fix32::from_int(
+                hero_stats(static_cast<HeroType>(player.hero)).health)) {
+            player.supply_heal_ticks = 0;
+        }
+    }
+    if (player.damage_bonus_ticks > 0) {
+        --player.damage_bonus_ticks;
+        if (player.damage_bonus_ticks == 0) {
+            player.damage_bonus = Fix32::zero();
+        }
     }
     if (player.shield_regen_delay > 0) {
         --player.shield_regen_delay;
@@ -527,6 +650,7 @@ void World::update_player(Player& player) {
     const WeaponStats& stats =
         weapon_stats(static_cast<WeaponType>(player.weapon));
     if (button_down(player.buttons, kButtonWeaponSwitch) &&
+        player.stun_ticks == 0 &&
         player.weapon_switch_cooldown == 0) {
         player.weapon = static_cast<std::uint8_t>(
             next_weapon(static_cast<WeaponType>(player.weapon)));
@@ -557,10 +681,12 @@ void World::update_player(Player& player) {
             }
         }
     }
-    if (player.reload_timer == 0 && player.ammo == 0) {
+    if (player.reload_timer == 0 && player.ammo == 0 &&
+        player.stun_ticks == 0) {
         player.reload_timer = stats.reload_ticks;
     }
-    if (button_down(player.buttons, kButtonReload) &&
+    if (player.stun_ticks == 0 &&
+        button_down(player.buttons, kButtonReload) &&
         player.reload_timer == 0 &&
         player.ammo < stats.magazine) {
         player.reload_timer = stats.reload_ticks;
@@ -584,7 +710,11 @@ void World::update_player(Player& player) {
         if ((player.gadget_latch & latch) == 0U) {
             player.gadget_latch = static_cast<std::uint8_t>(
                 player.gadget_latch | latch);
-            if (player.gadget_cooldowns[slot] == 0) {
+            const bool shock_resist = gadget_is_shock_resist(
+                hero_gadget(
+                    static_cast<HeroType>(player.hero), slot));
+            if (player.gadget_cooldowns[slot] == 0 &&
+                (player.stun_ticks == 0 || shock_resist)) {
                 activate_gadget(player, slot);
             }
         }
@@ -857,12 +987,18 @@ void World::update_player(Player& player) {
     }
 
     const bool fire_down = button_down(player.buttons, kButtonFire);
-    if (!fire_down) {
+    if (stunned) {
+        player.fire_latch = 0;
+        player.warmup_timer = 0;
+    } else if (!fire_down) {
         player.fire_latch = 0;
         player.warmup_timer = 0;
     } else if (player.fire_latch == 0) {
         player.fire_latch = 1;
         player.warmup_timer = stats.warmup_ticks;
+        if (player.ammo > 0) {
+            player.reload_timer = 0;
+        }
     } else if (player.warmup_timer > 0) {
         --player.warmup_timer;
     }
@@ -1038,6 +1174,7 @@ void World::spawn_gadget_projectile(
             projectile.half_size = Fix32::from_ratio(13, 10);
             projectile.stun_ticks = gadget.effect_ticks;
             projectile.damage = 0;
+            projectile.blast_self_ratio = Fix32::zero();
             projectile.blast_friend_ratio = Fix32::zero();
             break;
         case GadgetType::RocketLaunch:
@@ -1317,10 +1454,13 @@ bool World::wall_shot_blocked(
     }
     const Segment path{player.position, muzzle};
     const bool wide = action != WallShotAction::Detonate;
-    const AABB hero =
-        player_box(player).expanded(Fix32::from_ratio(1, 100));
-    const auto blocks = [&](const AABB& solid) {
-        if (hero.overlaps(solid)) {
+    const AABB hero = player_box(player);
+    const auto blocks = [&](const AABB& solid, bool platform) {
+        // Mirrors GunControllerImpl::checkWallShot: only Platform items are
+        // ignored while the hero overlaps them, and standing on top of a
+        // platform is contact rather than overlap.  Walls and rocks always
+        // count as blockers.
+        if (platform && hero.overlaps(solid)) {
             return false;
         }
         const AABB box = wide ? solid.expanded(half_size) : solid;
@@ -1328,15 +1468,56 @@ bool World::wall_shot_blocked(
         Fix32 t_max{};
         return segment_intersects_aabb(path, box, t_min, t_max);
     };
-    for (const AABB& solid : collision_solids_) {
-        if (blocks(solid)) {
-            return true;
+    if (!map_.borders.empty()) {
+        const Fix32 radius = wide ? half_size : Fix32::zero();
+        for (const Segment& border : map_.borders) {
+            Fix32 hit_t{};
+            Vec2 normal{};
+            if (swept_point_hits_segment(
+                    path, border, radius, hit_t, normal)) {
+                return true;
+            }
+        }
+    } else {
+        for (const AABB& solid : map_.solids) {
+            if (blocks(solid, false)) {
+                return true;
+            }
         }
     }
     if (!platform_puncher) {
-        for (const AABB& platform : map_.one_way_platforms) {
-            if (blocks(platform)) {
-                return true;
+        if (!map_.platform_shapes.empty()) {
+            const Fix32 radius = wide ? half_size : Fix32::zero();
+            for (std::size_t index = 0;
+                 index < map_.platform_shapes.size();
+                 ++index) {
+                if (index < map_.one_way_platforms.size() &&
+                    hero.overlaps(map_.one_way_platforms[index])) {
+                    continue;
+                }
+                const std::array<Vec2, 4>& shape =
+                    map_.platform_shapes[index];
+                for (std::size_t edge = 0; edge < shape.size(); ++edge) {
+                    Fix32 hit_t{};
+                    Vec2 normal{};
+                    if (swept_point_hits_segment(
+                            path,
+                            Segment{
+                                shape[edge],
+                                shape[(edge + 1) % shape.size()]},
+                            radius,
+                            hit_t,
+                            normal,
+                            true)) {
+                        return true;
+                    }
+                }
+            }
+        } else {
+            for (const AABB& platform : map_.one_way_platforms) {
+                if (blocks(platform, true)) {
+                    return true;
+                }
             }
         }
     }
@@ -1465,6 +1646,44 @@ void World::update_projectiles() {
     std::vector<EntityId> removals;
 
     projectiles_.for_each([&](Projectile& projectile) {
+        if (projectile.gadget ==
+            static_cast<std::uint8_t>(GadgetType::StaticShield) + 1) {
+            const Player* owner = players_.get(projectile.owner);
+            if (owner == nullptr || owner->alive == 0) {
+                explode(projectile);
+                removals.push_back(projectile.id);
+                return;
+            }
+            projectile.position = owner->position;
+            projectile.velocity = owner->velocity;
+            bool touched = false;
+            players_.for_each([&](const Player& player) {
+                if (touched || !player.alive ||
+                    player.team == projectile.team) {
+                    return;
+                }
+                const AABB box =
+                    player_box(player).expanded(projectile.half_size);
+                if (box.contains(projectile.position)) {
+                    touched = true;
+                }
+            });
+            if (touched) {
+                explode(projectile);
+                removals.push_back(projectile.id);
+                return;
+            }
+            if (projectile.life_ticks > 0) {
+                --projectile.life_ticks;
+            }
+            if (projectile.life_ticks == 0) {
+                if (projectile.explode_on_expire != 0) {
+                    explode(projectile);
+                }
+                removals.push_back(projectile.id);
+            }
+            return;
+        }
         const bool first_update = projectile.traveled == Fix32::zero();
         projectile.velocity.y += projectile.gravity;
         const Vec2 previous = projectile.position;
@@ -1558,6 +1777,8 @@ void World::update_projectiles() {
         const AABB* impact_box = nullptr;
         Fix32 impact_padding = Fix32::zero();
         EntityId impact_player = EntityId::none();
+        bool impact_border = false;
+        Vec2 impact_border_normal{};
         Vec2 impact_start = previous;
         Vec2 impact_end = projectile.position;
         Fix32 impact_distance = Fix32::zero();
@@ -1584,23 +1805,52 @@ void World::update_projectiles() {
                     impact_box = &solid;
                     impact_padding = pad;
                     impact_player = EntityId::none();
+                    impact_border = false;
                 }
             };
-            for (const AABB& solid : collision_solids_) {
+            const auto hit_segment = [&](const Segment& segment,
+                                         bool one_sided) {
+                Fix32 t{};
+                Vec2 normal{};
+                if (!swept_point_hits_segment(
+                        path, segment, padding, t, normal, one_sided)) {
+                    return;
+                }
+                if (!found || t < impact_t) {
+                    found = true;
+                    impact_t = t;
+                    impact_box = nullptr;
+                    impact_padding = Fix32::zero();
+                    impact_player = EntityId::none();
+                    impact_border = true;
+                    impact_border_normal = normal;
+                }
+            };
+            for (const AABB& solid : projectile_solids_) {
                 hit_box(solid, padding);
             }
             if (projectile.platform_puncher == 0) {
-                for (std::size_t index = 0;
-                     index < map_.one_way_platforms.size();
-                     ++index) {
-                    const bool hatchway =
-                        index >= map_.platform_hatchway.size() ||
-                        map_.platform_hatchway[index] != 0;
-                    if (!hatchway) {
-                        continue;
+                if (!projectile_platform_segments_.empty()) {
+                    for (const Segment& segment :
+                         projectile_platform_segments_) {
+                        hit_segment(segment, true);
                     }
-                    hit_box(map_.one_way_platforms[index], padding);
+                } else {
+                    for (std::size_t index = 0;
+                         index < map_.one_way_platforms.size();
+                         ++index) {
+                        const bool hatchway =
+                            index >= map_.platform_hatchway.size() ||
+                            map_.platform_hatchway[index] != 0;
+                        if (!hatchway) {
+                            continue;
+                        }
+                        hit_box(map_.one_way_platforms[index], padding);
+                    }
                 }
+            }
+            for (const Segment& border : map_.borders) {
+                hit_segment(border, false);
             }
             players_.for_each([&](Player& player) {
                 if (!player.alive || player.team == projectile.team ||
@@ -1622,8 +1872,69 @@ void World::update_projectiles() {
                     impact_t = t;
                     impact_box = nullptr;
                     impact_player = player.id;
+                    impact_border = false;
                 }
             });
+        };
+
+        const auto bounce_normal = [&](Vec2 normal, Fix32 restitution) {
+            const Fix32 along = projectile.velocity.dot(normal);
+            if (along < Fix32::zero()) {
+                projectile.velocity -= normal *
+                    (along * (Fix32::one() + restitution));
+            }
+            if (impact_t > Fix32::zero()) {
+                projectile.position =
+                    impact_start +
+                    (impact_end - impact_start) * impact_t +
+                    normal * Fix32::from_ratio(1, 1000);
+            } else {
+                projectile.position = impact_start;
+            }
+        };
+
+        const auto hit_border = [&](Vec2 normal) {
+            const Fix32 normal_velocity_value =
+                projectile.velocity.dot(normal);
+            if (floor_only) {
+                const bool floor = normal.y < Fix32::zero();
+                if (!floor) {
+                    bounce_normal(normal, bounce_restore);
+                    return;
+                }
+                const bool hard_enough =
+                    Fix32::abs(normal_velocity_value) >= floor_threshold;
+                if (!hard_enough || infinite_floor) {
+                    if (projectile.damping_rate != Fix32::one()) {
+                        projectile.detonate_damping *=
+                            projectile.damping_rate;
+                    }
+                    bounce_normal(normal, bounce_restore);
+                    return;
+                }
+            }
+            if (projectile.terrain_bounces == 0) {
+                finish_impact();
+                return;
+            }
+            if (projectile.detonator_hp > Fix32::zero() &&
+                projectile.detonator_hp_step > Fix32::zero()) {
+                projectile.detonator_hp -= projectile.detonator_hp_step;
+                if (projectile.detonator_hp <=
+                    Fix32::from_ratio(1, 1000)) {
+                    finish_impact();
+                    return;
+                }
+            }
+            --projectile.terrain_bounces;
+            if (projectile.terrain_bounces == 0) {
+                finish_impact();
+                return;
+            }
+            if (projectile.damping_rate != Fix32::one()) {
+                projectile.detonate_damping *= projectile.damping_rate;
+            }
+            bounce_normal(normal, bounce_restore);
         };
 
         // Fast shells leave the muzzle within one tick.  Sweep from the
@@ -1652,12 +1963,11 @@ void World::update_projectiles() {
         }
 
         if (found) {
+            const Vec2 impact_position =
+                impact_start + (impact_end - impact_start) * impact_t;
             if (impact_player.valid()) {
                 Player* player = players_.get(impact_player);
                 if (player != nullptr) {
-                    const Vec2 impact_position =
-                        impact_start +
-                        (impact_end - impact_start) * impact_t;
                     const bool in_range =
                         projectile.range <= Fix32::zero() ||
                         (impact_position - projectile.origin).length_sq() <=
@@ -1678,6 +1988,8 @@ void World::update_projectiles() {
                     apply_damage(*player, hit_damage, projectile.owner);
                 }
                 finish_impact();
+            } else if (impact_border) {
+                hit_border(impact_border_normal);
             } else if (impact_box != nullptr) {
                 const Fix32 top = impact_box->min.y - impact_padding;
                 const Fix32 bottom = impact_box->max.y + impact_padding;
@@ -1686,9 +1998,10 @@ void World::update_projectiles() {
                 const bool from_below =
                     impact_start.y >= bottom && projectile.position.y <= bottom;
                 hit_terrain(
-                    !from_above && !from_below, impact_start, from_above);
+                    !from_above && !from_below, impact_position, from_above);
             }
         }
+
 
         if (!remove) {
             if (projectile.life_ticks > 0) {
@@ -1742,6 +2055,14 @@ void World::apply_damage(
     }
 
     Player* attacker = players_.get(attacker_id);
+    if (attacker != nullptr && attacker->damage_bonus > Fix32::zero()) {
+        const Fix32 boosted = Fix32::from_int(damage) *
+            (Fix32::one() + attacker->damage_bonus);
+        damage = static_cast<std::uint16_t>(
+            std::clamp(boosted.to_int_round(), 0, 65535));
+    }
+    // health_pump is removed by damage in the original buff definition.
+    player.supply_heal_ticks = 0;
     const std::uint16_t absorbed =
         std::min<std::uint16_t>(player.shield, damage);
     const std::uint16_t hp_damage =
@@ -1910,70 +2231,331 @@ void World::explode(const Projectile& projectile) {
                     player.stun_ticks = std::max(
                         player.stun_ticks,
                         projectile.stun_ticks);
+                    player.reload_timer = 0;
                 }
             }
         }
     });
 }
 
+void World::rebuild_control_point_config() {
+    control_point_config_ = {};
+    control_points_enabled_ = false;
+    control_points_legacy_ = false;
+    if (map_.control_points.has_value() &&
+        !map_.control_points->points.empty() &&
+        !map_.control_points->entries.empty()) {
+        control_point_config_ = *map_.control_points;
+        control_points_enabled_ = true;
+        return;
+    }
+    if (map_.objective.has_value()) {
+        const Objective& objective = *map_.objective;
+        ControlPointGenerator generator;
+        generator.update_interval = 1;
+        generator.start_tick = 0;
+        generator.min_interval = 0;
+        generator.max_interval = 0;
+        generator.instance_limit = 1;
+        generator.capture_group_size = 0;
+        ControlPointDef def;
+        def.dimensions = Vec2{
+            objective.area.max.x - objective.area.min.x,
+            objective.area.max.y - objective.area.min.y};
+        def.capture_ticks = objective.capture_ticks;
+        def.score_ticks = objective.score_ticks;
+        def.capture_score = objective.capture_score;
+        def.hold_score = objective.hold_score;
+        generator.points.push_back(def);
+        generator.entries.push_back(objective.area.center());
+        control_point_config_ = generator;
+        control_points_enabled_ = true;
+        control_points_legacy_ = true;
+    }
+}
+
+void World::reset_control_points() {
+    control_points_.clear();
+    cp_vacant_entries_.clear();
+    cp_respawn_frames_.clear();
+    cp_recycled_ = false;
+    if (game_mode_ != GameMode::Control || !control_points_enabled_) {
+        return;
+    }
+    if (control_points_legacy_) {
+        ControlPointState point;
+        point.def = 0;
+        point.entry = 0;
+        control_points_.push_back(point);
+        return;
+    }
+    for (std::size_t index = 0;
+         index < control_point_config_.entries.size();
+         ++index) {
+        cp_vacant_entries_.push_back(static_cast<std::uint16_t>(index));
+    }
+}
+
+AABB World::control_point_area(const ControlPointState& point) const {
+    return control_point_config_.area(point.def, point.entry);
+}
+
+std::int16_t World::control_point_capture_ticks(
+    const ControlPointState& point) const {
+    if (point.def >= control_point_config_.points.size()) {
+        return 0;
+    }
+    return static_cast<std::int16_t>(
+        control_point_config_.points[point.def].capture_ticks);
+}
+
+std::uint16_t World::control_point_score_ticks_needed(
+    const ControlPointState& point) const {
+    if (point.def >= control_point_config_.points.size()) {
+        return 0;
+    }
+    return control_point_config_.points[point.def].score_ticks;
+}
+
+std::uint8_t World::point_owner(const ControlPointState& point) const {
+    const std::int16_t capture_ticks = control_point_capture_ticks(point);
+    if (capture_ticks <= 0) {
+        return kObjectiveNeutral;
+    }
+    if (point.ticks >= capture_ticks) {
+        return 1;
+    }
+    if (point.ticks <= -capture_ticks) {
+        return 2;
+    }
+    return kObjectiveNeutral;
+}
+
+void World::award_control_point_score(
+    std::uint8_t team,
+    std::int16_t amount) {
+    if (team < 1 || team > 2 || amount <= 0) {
+        return;
+    }
+    const std::int64_t score =
+        static_cast<std::int64_t>(scores_[team - 1U]) +
+        static_cast<std::int64_t>(amount);
+    scores_[team - 1U] = static_cast<std::int32_t>(
+        std::min<std::int64_t>(
+            score,
+            std::numeric_limits<std::int32_t>::max()));
+}
+
+void World::remove_control_point(std::size_t index) {
+    if (index >= control_points_.size()) {
+        return;
+    }
+    cp_vacant_entries_.push_back(control_points_[index].entry);
+    control_points_.erase(
+        control_points_.begin() + static_cast<std::ptrdiff_t>(index));
+    cp_recycled_ = true;
+}
+
+void World::spawn_control_point() {
+    const ControlPointGenerator& generator = control_point_config_;
+    if (generator.points.empty() || cp_vacant_entries_.empty()) {
+        return;
+    }
+    std::size_t pool = cp_vacant_entries_.size();
+    if (cp_recycled_ && pool > generator.capture_group_size) {
+        pool -= generator.capture_group_size;
+    }
+    if (pool == 0) {
+        pool = 1;
+    }
+    const std::size_t pick = rng_.bounded(static_cast<std::uint32_t>(pool));
+    const std::uint16_t entry = cp_vacant_entries_[pick];
+    std::uint8_t def = 0;
+    if (generator.points.size() > 1) {
+        def = static_cast<std::uint8_t>(
+            rng_.bounded(static_cast<std::uint32_t>(
+                generator.points.size())));
+    }
+    ControlPointState point;
+    point.def = def;
+    point.entry = entry;
+    control_points_.push_back(point);
+    cp_vacant_entries_.erase(
+        cp_vacant_entries_.begin() + static_cast<std::ptrdiff_t>(pick));
+}
+
+void World::schedule_control_point_respawns() {
+    const ControlPointGenerator& generator = control_point_config_;
+    if (generator.instance_limit == 0) {
+        return;
+    }
+    const std::int32_t vacancies =
+        static_cast<std::int32_t>(generator.instance_limit) -
+        static_cast<std::int32_t>(control_points_.size()) -
+        static_cast<std::int32_t>(cp_respawn_frames_.size());
+    for (std::int32_t index = 0; index < vacancies; ++index) {
+        std::uint32_t interval = generator.min_interval;
+        if (generator.max_interval > generator.min_interval) {
+            interval += rng_.bounded(
+                generator.max_interval - generator.min_interval + 1U);
+        }
+        cp_respawn_frames_.push_back(tick_ + interval);
+    }
+    for (;;) {
+        std::size_t due = cp_respawn_frames_.size();
+        for (std::size_t index = 0;
+             index < cp_respawn_frames_.size();
+             ++index) {
+            if (cp_respawn_frames_[index] <= tick_) {
+                due = index;
+                break;
+            }
+        }
+        if (due == cp_respawn_frames_.size()) {
+            break;
+        }
+        if (!cp_vacant_entries_.empty()) {
+            spawn_control_point();
+        }
+        cp_respawn_frames_.erase(
+            cp_respawn_frames_.begin() + static_cast<std::ptrdiff_t>(due));
+    }
+}
+
+void World::process_control_points() {
+    const ControlPointGenerator& generator = control_point_config_;
+    if (generator.points.empty()) {
+        return;
+    }
+    std::vector<std::size_t> captured_indices[2];
+    for (std::size_t index = 0; index < control_points_.size(); ++index) {
+        ControlPointState& point = control_points_[index];
+        if (point.def >= generator.points.size() ||
+            point.entry >= generator.entries.size()) {
+            point.hold_ticks = 0;
+            continue;
+        }
+        const ControlPointDef& def = generator.points[point.def];
+        const AABB area = control_point_area(point);
+
+        bool present[2] = {false, false};
+        players_.for_each([&](const Player& player) {
+            if (player.alive != 0 && area.contains(player.position)) {
+                present[player.team] = true;
+            }
+        });
+
+        const std::int16_t capture_ticks =
+            control_point_capture_ticks(point);
+        if (capture_ticks <= 0) {
+            point.hold_ticks = 0;
+            continue;
+        }
+        const std::int16_t previous_ticks = point.ticks;
+        if (!(present[0] && present[1])) {
+            if (present[0]) {
+                if (point.ticks < capture_ticks) {
+                    ++point.ticks;
+                }
+            } else if (present[1]) {
+                if (point.ticks > -capture_ticks) {
+                    --point.ticks;
+                }
+            }
+        }
+        const std::uint8_t captured_team =
+            point.ticks == capture_ticks
+                ? 1
+                : (point.ticks == -capture_ticks ? 2 : kObjectiveNeutral);
+        if (captured_team == kObjectiveNeutral) {
+            point.hold_ticks = 0;
+            continue;
+        }
+        const bool just_captured = previous_ticks != point.ticks;
+        if (generator.capture_group_size > 0) {
+            captured_indices[captured_team - 1U].push_back(index);
+        } else if (just_captured) {
+            award_control_point_score(captured_team, def.capture_score);
+        }
+        if (just_captured) {
+            point.hold_ticks = 0;
+        } else if (def.hold_score > 0 && def.score_ticks > 0) {
+            const std::uint32_t interval =
+                generator.update_interval == 0
+                    ? 1
+                    : generator.update_interval;
+            std::uint32_t hold_ticks =
+                static_cast<std::uint32_t>(point.hold_ticks) + interval;
+            hold_ticks = std::min<std::uint32_t>(hold_ticks, 65535);
+            while (hold_ticks >= def.score_ticks) {
+                award_control_point_score(captured_team, def.hold_score);
+                hold_ticks -= def.score_ticks;
+            }
+            point.hold_ticks = static_cast<std::uint16_t>(hold_ticks);
+        } else {
+            point.hold_ticks = 0;
+        }
+    }
+
+    if (generator.capture_group_size > 0) {
+        struct Removal {
+            std::size_t index = 0;
+            std::uint8_t team = 0;
+        };
+        std::vector<Removal> removals;
+        for (std::uint8_t team = 1; team <= 2; ++team) {
+            const std::size_t count =
+                captured_indices[team - 1U].size() /
+                generator.capture_group_size *
+                generator.capture_group_size;
+            for (std::size_t index = 0; index < count; ++index) {
+                removals.push_back(Removal{
+                    captured_indices[team - 1U][index],
+                    team});
+            }
+        }
+        std::sort(
+            removals.begin(),
+            removals.end(),
+            [](const Removal& a, const Removal& b) {
+                return a.index > b.index;
+            });
+        for (const Removal& removal : removals) {
+            if (removal.index >= control_points_.size()) {
+                continue;
+            }
+            const ControlPointState& point =
+                control_points_[removal.index];
+            if (point.def < generator.points.size()) {
+                award_control_point_score(
+                    removal.team,
+                    generator.points[point.def].capture_score);
+            }
+            remove_control_point(removal.index);
+        }
+    }
+}
+
+void World::update_control_points() {
+    if (control_points_legacy_) {
+        process_control_points();
+        return;
+    }
+    const ControlPointGenerator& generator = control_point_config_;
+    const std::uint32_t interval =
+        generator.update_interval == 0 ? 1 : generator.update_interval;
+    if (tick_ < generator.start_tick || (tick_ % interval) != 0) {
+        return;
+    }
+    process_control_points();
+    schedule_control_point_respawns();
+}
+
 void World::update_objective() {
-    if (game_mode_ != GameMode::Control || !map_.objective.has_value()) {
+    if (game_mode_ != GameMode::Control || !control_points_enabled_) {
         return;
     }
-
-    bool present[2] = {false, false};
-    players_.for_each([&](const Player& player) {
-        if (player.alive != 0 &&
-            player_box(player).overlaps(*map_.objective)) {
-            present[player.team] = true;
-        }
-    });
-
-    if (present[0] && present[1]) {
-        objective_capturing_team_ = kObjectiveNeutral;
-        objective_score_ticks_ = 0;
-        return;
-    }
-
-    const std::uint8_t team = present[0]
-        ? 1
-        : (present[1] ? 2 : kObjectiveNeutral);
-    if (team == kObjectiveNeutral) {
-        objective_capturing_team_ = kObjectiveNeutral;
-        objective_score_ticks_ = 0;
-        if (objective_progress_ > 0) {
-            --objective_progress_;
-        }
-        return;
-    }
-
-    if (objective_owner_ == team) {
-        objective_capturing_team_ = kObjectiveNeutral;
-        objective_progress_ = 0;
-        if (objective_score_ticks_ < kObjectiveScoreTicks) {
-            ++objective_score_ticks_;
-        }
-        if (objective_score_ticks_ >= kObjectiveScoreTicks) {
-            ++scores_[team - 1U];
-            objective_score_ticks_ = 0;
-        }
-        return;
-    }
-
-    if (objective_capturing_team_ != team) {
-        objective_capturing_team_ = team;
-        objective_progress_ = 0;
-    }
-    objective_score_ticks_ = 0;
-    if (objective_progress_ < kObjectiveCaptureTicks) {
-        ++objective_progress_;
-    }
-    if (objective_progress_ >= kObjectiveCaptureTicks) {
-        objective_owner_ = team;
-        objective_capturing_team_ = kObjectiveNeutral;
-        objective_progress_ = 0;
-        objective_score_ticks_ = 0;
-    }
+    update_control_points();
 }
 bool World::player_accepts_drop(
     const Player& player,
@@ -2270,6 +2852,142 @@ void World::update_drops() {
     });
 }
 
+bool World::spawner_has_supply(std::size_t spawner_index) const {
+    for (const SupplyInstance& supply : supplies_) {
+        if (supply.spawner == spawner_index) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void World::reset_supplies() {
+    supply_spawner_states_.assign(map_.supply_spawners.size(), {});
+    supplies_.clear();
+    for (std::size_t index = 0; index < map_.supply_spawners.size(); ++index) {
+        const std::uint32_t start = map_.supply_spawners[index].start_tick;
+        supply_spawner_states_[index].timer = start == 0 ? 1 : start;
+    }
+}
+
+void World::spawn_supply(std::size_t spawner_index) {
+    if (spawner_index >= map_.supply_spawners.size()) {
+        return;
+    }
+    const SupplySpawner& spawner = map_.supply_spawners[spawner_index];
+    if (spawner.supplies.empty() || spawner.entries.empty()) {
+        return;
+    }
+    std::vector<std::uint8_t> types;
+    types.reserve(spawner.supplies.size());
+    for (const std::string& supply_id : spawner.supplies) {
+        if (content().find_supply(supply_id) == nullptr) {
+            continue;
+        }
+        types.push_back(content().find_supply_type(supply_id));
+    }
+    if (types.empty()) {
+        return;
+    }
+    // Mirrors SupplyGeneratorDef::createSupply(index % supplyDefs.Length).
+    const std::size_t type_index =
+        static_cast<std::size_t>(rng_.bounded(65536U)) % types.size();
+    const std::size_t entry_index =
+        static_cast<std::size_t>(rng_.bounded(
+            static_cast<std::uint32_t>(spawner.entries.size())));
+    SupplyInstance supply;
+    supply.spawner = static_cast<std::uint8_t>(spawner_index);
+    supply.type = types[type_index];
+    supply.position = spawner.entries[entry_index];
+    supplies_.push_back(supply);
+}
+
+void World::apply_supply(Player& player, const SupplyStats& supply) {
+    const HeroStats& hero =
+        hero_stats(static_cast<HeroType>(player.hero));
+    if (supply.kind == SupplyKind::Health) {
+        const Fix32 max_health = Fix32::from_int(hero.health);
+        const Fix32 heal = Fix32::from_int(
+            (max_health * supply.health_gain).to_int_round());
+        player.health = Fix32::min(max_health, player.health + heal);
+        // Original buff_remover matcher removes negative, non-irremovable
+        // buffs (slow / stun are the ones the simulation models).
+        player.slow_ticks = 0;
+        player.stun_ticks = 0;
+        if (supply.heal_increment > 0 && supply.heal_interval > 0 &&
+            supply.effect_ticks > 0) {
+            player.supply_heal_ticks = supply.effect_ticks;
+            player.supply_heal_period = supply.heal_interval;
+            player.supply_heal_interval = supply.heal_interval;
+            player.supply_heal_amount = supply.heal_increment;
+        }
+    } else if (supply.kind == SupplyKind::Damage) {
+        player.damage_bonus = supply.damage_bonus;
+        player.damage_bonus_ticks = supply.effect_ticks;
+    }
+}
+
+void World::update_supplies() {
+    if (map_.supply_spawners.empty()) {
+        return;
+    }
+
+    for (std::size_t index = 0; index < supply_spawner_states_.size();
+         ++index) {
+        SupplySpawnerState& state = supply_spawner_states_[index];
+        if (state.timer > 0) {
+            --state.timer;
+            if (state.timer == 0) {
+                spawn_supply(index);
+            }
+        } else if (!spawner_has_supply(index)) {
+            // The original computes minInterval + nextInt(max - max + 1),
+            // which always yields the minimum interval.
+            const std::uint16_t interval =
+                map_.supply_spawners[index].min_interval;
+            state.timer = interval == 0 ? 1 : interval;
+        }
+    }
+
+    if (supplies_.empty()) {
+        return;
+    }
+    for (std::size_t index = 0; index < supplies_.size();) {
+        bool picked = false;
+        players_.for_each([&](Player& player) {
+            if (picked || player.alive == 0) {
+                return;
+            }
+            const SupplyStats& stats = content().supply(
+                supplies_[index].type);
+            if (stats.kind == SupplyKind::Health) {
+                const HeroStats& hero = hero_stats(
+                    static_cast<HeroType>(player.hero));
+                if (player.health >= Fix32::from_int(hero.health) &&
+                    player.shield >= hero.shield) {
+                    return;
+                }
+            }
+            const Fix32 half = stats.kind == SupplyKind::Health
+                ? Fix32::from_ratio(5, 10)
+                : Fix32::from_ratio(65, 100);
+            const AABB supply_box = AABB::from_center(
+                supplies_[index].position, Vec2{half, half});
+            if (!player_box(player).overlaps(supply_box)) {
+                return;
+            }
+            apply_supply(player, stats);
+            picked = true;
+        });
+        if (picked) {
+            supplies_.erase(
+                supplies_.begin() + static_cast<std::ptrdiff_t>(index));
+        } else {
+            ++index;
+        }
+    }
+}
+
 void World::update_match_state() {
     if (winner_ != 0) {
         return;
@@ -2310,6 +3028,12 @@ void World::respawn_player(Player& player) {
     player.invulnerable_ticks = 0;
     player.heal_ticks = 0;
     player.heal_interval = 0;
+    player.supply_heal_ticks = 0;
+    player.supply_heal_interval = 0;
+    player.supply_heal_period = 0;
+    player.supply_heal_amount = 0;
+    player.damage_bonus_ticks = 0;
+    player.damage_bonus = Fix32::zero();
     player.slow_ticks = 0;
     player.stun_ticks = 0;
     player.gadget_latch = 0;
@@ -2349,10 +3073,22 @@ void World::save(WorldSnapshot& snapshot) const {
     snapshot.score_limit = score_limit_;
     snapshot.winner = winner_;
     snapshot.game_mode = static_cast<std::uint8_t>(game_mode_);
-    snapshot.objective_owner = objective_owner_;
-    snapshot.objective_capturing_team = objective_capturing_team_;
-    snapshot.objective_progress = objective_progress_;
-    snapshot.objective_score_ticks = objective_score_ticks_;
+    snapshot.objective_owner = objective_owner();
+    snapshot.objective_capturing_team = objective_capturing_team();
+    snapshot.objective_progress = objective_progress();
+    snapshot.objective_score_ticks = objective_score_ticks();
+    snapshot.control_points.clear();
+    snapshot.control_point_vacant_entries = cp_vacant_entries_;
+    snapshot.control_point_respawn_frames = cp_respawn_frames_;
+    snapshot.control_points_recycled = cp_recycled_ ? 1 : 0;
+    for (const ControlPointState& point : control_points_) {
+        ControlPointSnapshot saved;
+        saved.def = point.def;
+        saved.entry = point.entry;
+        saved.ticks = point.ticks;
+        saved.hold_ticks = point.hold_ticks;
+        snapshot.control_points.push_back(saved);
+    }
     snapshot.entities = entities_.snapshot();
 
     players_.for_each([&](const Player& player) {
@@ -2381,6 +3117,9 @@ void World::save(WorldSnapshot& snapshot) const {
         [](const Drop& a, const Drop& b) {
             return entity_less(a.id, b.id);
         });
+
+    snapshot.supply_spawners = supply_spawner_states_;
+    snapshot.supplies = supplies_;
 }
 
 bool World::restore(const WorldSnapshot& snapshot, std::string* error) {
@@ -2408,16 +3147,37 @@ bool World::restore(const WorldSnapshot& snapshot, std::string* error) {
         }
         return false;
     }
+    if (snapshot.supplies.size() > kSnapshotMaxSupplies ||
+        snapshot.supply_spawners.size() > kSnapshotMaxSupplySpawners ||
+        snapshot.supply_spawners.size() !=
+            map_.supply_spawners.size()) {
+        if (error) {
+            *error = "invalid snapshot supply count";
+        }
+        return false;
+    }
     if (snapshot.match_ticks > kSnapshotMaxMatchTicks ||
         snapshot.score_limit == 0 ||
         snapshot.winner > 3 ||
         snapshot.game_mode > static_cast<std::uint8_t>(GameMode::Crystal) ||
         snapshot.objective_owner > 2 ||
         snapshot.objective_capturing_team > 2 ||
-        snapshot.objective_progress > kObjectiveCaptureTicks ||
-        snapshot.objective_score_ticks > kObjectiveScoreTicks) {
+        snapshot.objective_progress > kMapMaxObjectiveTicks ||
+        snapshot.objective_score_ticks > kMapMaxObjectiveTicks) {
         if (error) {
             *error = "invalid snapshot match state";
+        }
+        return false;
+    }
+    const bool control_mode =
+        snapshot.game_mode == static_cast<std::uint8_t>(GameMode::Control);
+    if (!control_mode &&
+        (!snapshot.control_points.empty() ||
+         !snapshot.control_point_vacant_entries.empty() ||
+         !snapshot.control_point_respawn_frames.empty() ||
+         snapshot.control_points_recycled != 0)) {
+        if (error) {
+            *error = "non-control snapshot has control points";
         }
         return false;
     }
@@ -2431,12 +3191,47 @@ bool World::restore(const WorldSnapshot& snapshot, std::string* error) {
         }
         return false;
     }
-    if (snapshot.game_mode == static_cast<std::uint8_t>(GameMode::Control) &&
-        !map_.objective.has_value()) {
+    if (control_mode && !control_points_enabled_) {
         if (error) {
             *error = "control mode requires a map objective";
         }
         return false;
+    }
+    if (control_mode) {
+        if (snapshot.control_points.size() >
+            control_point_config_.instance_limit) {
+            if (error) {
+                *error = "invalid control point count";
+            }
+            return false;
+        }
+        for (const ControlPointSnapshot& point : snapshot.control_points) {
+            if (point.def >= control_point_config_.points.size() ||
+                point.entry >= control_point_config_.entries.size()) {
+                if (error) {
+                    *error = "invalid control point reference";
+                }
+                return false;
+            }
+            const std::int16_t capture_ticks = static_cast<std::int16_t>(
+                control_point_config_.points[point.def].capture_ticks);
+            const std::int32_t magnitude =
+                point.ticks < 0 ? -point.ticks : point.ticks;
+            if (magnitude > capture_ticks) {
+                if (error) {
+                    *error = "invalid control point progress";
+                }
+                return false;
+            }
+        }
+        for (const std::uint16_t entry : snapshot.control_point_vacant_entries) {
+            if (entry >= control_point_config_.entries.size()) {
+                if (error) {
+                    *error = "invalid control point vacated entry";
+                }
+                return false;
+            }
+        }
     }
     if (snapshot.game_mode != static_cast<std::uint8_t>(GameMode::Crystal) &&
         !snapshot.drops.empty()) {
@@ -2543,10 +3338,27 @@ bool World::restore(const WorldSnapshot& snapshot, std::string* error) {
         drops.add(source.id, source);
     }
 
+    std::vector<std::uint8_t> used_supply_spawners(
+        map_.supply_spawners.size(), 0);
+    for (const SupplyInstance& source : snapshot.supplies) {
+        if (source.spawner >= map_.supply_spawners.size() ||
+            used_supply_spawners[source.spawner] != 0 ||
+            source.type >= content().supply_count() ||
+            !map_.bounds.contains(source.position)) {
+            if (error) {
+                *error = "invalid snapshot supply fields";
+            }
+            return false;
+        }
+        used_supply_spawners[source.spawner] = 1;
+    }
+
     entities_ = std::move(allocator);
     players_ = std::move(players);
     projectiles_ = std::move(projectiles);
     drops_ = std::move(drops);
+    supply_spawner_states_ = snapshot.supply_spawners;
+    supplies_ = snapshot.supplies;
     rng_ = rng;
     scores_ = snapshot.scores;
     tick_ = snapshot.tick;
@@ -2554,10 +3366,18 @@ bool World::restore(const WorldSnapshot& snapshot, std::string* error) {
     score_limit_ = snapshot.score_limit;
     winner_ = snapshot.winner;
     game_mode_ = static_cast<GameMode>(snapshot.game_mode);
-    objective_owner_ = snapshot.objective_owner;
-    objective_capturing_team_ = snapshot.objective_capturing_team;
-    objective_progress_ = snapshot.objective_progress;
-    objective_score_ticks_ = snapshot.objective_score_ticks;
+    control_points_.clear();
+    cp_vacant_entries_ = snapshot.control_point_vacant_entries;
+    cp_respawn_frames_ = snapshot.control_point_respawn_frames;
+    cp_recycled_ = snapshot.control_points_recycled != 0;
+    for (const ControlPointSnapshot& saved : snapshot.control_points) {
+        ControlPointState point;
+        point.def = saved.def;
+        point.entry = saved.entry;
+        point.ticks = saved.ticks;
+        point.hold_ticks = saved.hold_ticks;
+        control_points_.push_back(point);
+    }
     player_count_ = static_cast<int>(snapshot.players.size());
     bot_mask_ = 0;
     players_.for_each([&](const Player& player) {

@@ -9,6 +9,7 @@ C++20 横版 PvP 射击游戏。
 - **Phase 7 内容管线与目标模式完成**：3 英雄、6 武器、2 地图、JSON 校验器、地图二进制编译器、内容指纹、v4 协议（当前 v9）、控制点模式、84 帧英雄图集、21 组动画状态和开发期资源热重载。
 - **Phase 8 进行中**：RmlUi 主菜单、在线房间、结构化对局 HUD、Tab 计分板、暂停和结算面板；已加入确定性 K/D/DMG/BLOCK 战斗统计、护盾/回盾、三名英雄各 3 个 gadget 技能、First Blood/连杀事件，快照升级到 v15、协议 v9；战斗表现加入程序化枪口闪光、弹道拖尾、命中火花、爆炸冲击、技能粒子纹理和纯表现相机抖动/后坐力；SDL3 音频加入武器/命中/爆炸/脚步/UI 程序化音效与距离衰减/声像，技能释放/命中/爆炸改用内置 `sounds/effects` 音频；设置页加入音量、分辨率/全屏/VSync、血效和键位重绑；新增默认中文/英文切换、启动加载页和启动/运行时错误提示。
 - **水晶/收集模式**：确定性水晶实体、多水晶携带（`max_capacity`/`carry_limit`）、attach/hold/deliver 三段可配置计分、死亡掉落/回收、depot 交付计时，进入快照与协议；地图 `drop_spawns`/`drop_depots`，内容 `drops`/`mode_rules.crystal`；内置水晶 sprite、拾取/交付音效、depot 脉冲光和携带方向光柱；`crystal_01`/`crystal_02` 两张水晶地图均带美术，携带水晶时头顶显示背包 sprite 和数量。
+- **原版补给道具**：从原版 `supply_gen` 插件导入各地图的 `supply_spawners`，生成 `health_box`（回复 20% 最大生命 + health_pump）和 `double_damage`（+100% 伤害 10 秒）；补给为确定性世界状态，进入快照/协议，客户端绘制原版医疗箱/双倍伤害贴图并在 HUD 显示状态。
 - **分层角色美术（方案 A）已完成基础版**：Scout/Gunner/Assault 使用基础皮肤分件，按 prefab z-order 分层绘制，程序化 `idle/run/jump/fall/shoot/hurt/death`，按当前武器切换六种武器 sprite；资源缺失自动回退 84 帧占位图集。逐帧动画仍需额外的 `.anim`/FBX 数据。
 
 技术栈：SDL3、bgfx、RmlUi、KCP over UDP、自定义定点数。
@@ -494,7 +495,15 @@ py -3 scripts\import_original_map.py --bundle worlds/worldflagcapture --map-id w
 
 相机按 `MOUSE_REACTION` 模式实现：鼠标死区 1.2 单位、水平/垂直弹性 1/1.5、回中 Lerp 2/4、最大前移 ±6/±4 单位，并夹在地图边界内。`client.camera_zoom`（或 `--camera-zoom`）默认 1.0，与 `CameraScale` 一致；大于 1 会拉远视角。
 
-`world1` 的 `border` 是零厚度线段，转换后的 AABB 约为 0.12 厚，桥面和崖顶齐平时会在接缝处多出约 0.06 的隐形台阶。`World::step` 现在允许已落地角色水平跨过不超过 0.12 的人造小台阶，因此木桥两端不会再把人卡住；真正的墙仍会阻挡。此前为修斜坡跳跃曾把 8 个 `y=33.54` 的 border solid 下移 0.7，导致 `x≈6.5 / 37.6 / 43.2` 一带的碰撞面偏低 0.7，角色会陷进草坡；这些 solid 已恢复到位，并新增 `test_world1_slope_surface` 回归测试。
+`world1` 的 `border` 是零厚度线段，转换后的 AABB 约为 0.12 厚，桥面和崖顶齐平时会在接缝处多出约 0.06 的隐形台阶；斜线按 0.5 步长栅格化后，AABB 角点最多会比真实线段外凸约 0.33。角色移动仍使用 AABB 近似，`World::step` 允许已落地角色水平跨过不超过 0.12 的人造小台阶，因此木桥两端不会再把人卡住；真正的墙仍会阻挡。弹丸和命中射线改用地图新增的 `borders` 原始线段（`swept_point_hits_segment`），榴弹不会再在这些 AABB 台阶的“空气”里提前反弹。平台同样新增了 `platform_shapes`（原版四边形顶点），弹丸按四条真实边碰撞；倾斜平台不再用外接 AABB 判定，避免在平台端部的空三角区域提前反弹。角色移动仍使用 `solids`/`platforms` 的 AABB 近似。
+
+线段/端点碰撞按原版 `Collider` 的语义做了方向过滤：只有速度方向真正指向该表面（`velocity·normal < 0`）时才判定碰撞，擦着平台端角或沿墙平行飞行不会再被端点圆角“粘住”弹回。平台的多边形边按原版 `collideRangeCP(..., lenient=true)` 做**单向**判定（顶点顺序给出的外法线，只从外侧撞；从平台下方/背面穿过不反弹），`border` 墙线仍按双向线段处理。`world1` 的平台数据此前与 `platform_shapes` 顺序/尺寸不一致，已按当前导入脚本重新对齐（平台、hatchway、跳板三者同一顺序）。
+
+客户端渲染重力弹丸（榴弹）时不再做固定步插值，直接画在模拟位置上；否则画面里的榴弹会比碰撞体落后最多一个 tick（下落越快越明显），看起来就是“还没碰到墙/平台就反弹”。本地角色也按**模拟位置**绘制（远端角色保留插值），保证枪口与弹丸在同一时间基准上。原版榴弹只有弹壳精灵（`shellPrefabName` + `ArtifactGameObjectController`），**不画弹道曲线**，所以现在默认也不再给榴弹画曲线；需要调试时设 `NSYNC_SHELL_TRAIL=1`，曲线起点用 `projectile.origin`（真实发射点），不会再出现“起点对不上枪口”。设置环境变量 `NSYNC_COLLISION_DEBUG=1` 可把 `border`（绿线）和平台碰撞四边形（品红线）画出来对照。
+
+弹道预览（默认关闭，原版没有）：游戏内按 `F6` 切换，或启动前设 `NSYNC_BALLISTIC_PREVIEW=1`。只对受重力的武器（榴弹）生效：从枪口按模拟参数（初速、重力、反弹次数、`normal_velocity`、生命、射程）逐 tick 预测，画出黄色细线与落点圆点，撞墙按 `restore=1/2` 反射，落地两次（`terrain_bounces`）或超出射程即停。用来补偿“原版直线瞄准 + 重力下坠”带来的偏低。
+
+此前为修斜坡跳跃曾把 8 个 `y=33.54` 的 border solid 下移 0.7，导致 `x≈6.5 / 37.6 / 43.2` 一带的碰撞面偏低 0.7，角色会陷进草坡；这些 solid 已恢复到位，并新增 `test_world1_slope_surface` 回归测试。
 
 分层角色 CPU 基准（10 玩家 × 9 部件、全部受击闪白，1280×720）：
 

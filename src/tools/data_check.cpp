@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
         << "datac: heroes=" << database.hero_count()
         << " weapons=" << database.weapon_count()
         << " drops=" << database.drop_count()
+        << " supplies=" << database.supply_count()
         << " fingerprint=" << database.fingerprint();
     if (check) {
         nsync::core::ContentDatabase defaults;

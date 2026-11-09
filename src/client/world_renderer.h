@@ -52,6 +52,11 @@ public:
     [[nodiscard]] bool map_art_camera_bounds(core::AABB& bounds) const;
     void set_hero_art_mode(HeroArtMode mode) { hero_art_mode_ = mode; }
     void set_blood_enabled(bool enabled) { blood_enabled_ = enabled; }
+    void set_ballistic_preview(bool enabled) { ballistic_preview_ = enabled; }
+    void toggle_ballistic_preview() { ballistic_preview_ = !ballistic_preview_; }
+    [[nodiscard]] bool ballistic_preview() const {
+        return ballistic_preview_;
+    }
     void reset_player_visuals();
     // Presentation-only correction blending: `offset` is
     // (old simulated position - new simulated position) of a player whose
@@ -109,12 +114,18 @@ private:
     struct ProjectileVisual {
         std::vector<core::Vec2> trail;
         core::Vec2 last_position{};
+        core::Vec2 render_position{};
+        core::Vec2 interp_from{};
+        core::Vec2 interp_to{};
         core::Vec2 offset{};
         std::uint32_t start_tick = 0;
+        std::uint32_t interp_tick = 0;
         float explosion_radius = 0.0f;
         float trail_accum = 0.0f;
+        float shield_accum = 0.0f;
         std::uint8_t explosive = 0;
         std::uint8_t gadget = 0;
+        bool has_render_position = false;
     };
 
     struct ParticleVisual {
@@ -163,11 +174,14 @@ private:
         int last_health = -1;
         int last_shield = -1;
         int last_ammo = -1;
+        int last_fire_cooldown = -1;
         std::uint8_t last_weapon = 0;
         bool last_alive = false;
         float hurt_seconds = 0.0f;
         float shoot_seconds = 0.0f;
         float state_seconds = 0.0f;
+        float shock_seconds = 0.0f;
+        float shock_accum = 0.0f;
         core::AnimationState last_state = core::AnimationState::Idle;
         float render_x = 0.0f;
         float render_y = 0.0f;
@@ -192,6 +206,7 @@ private:
     void add_shake(float strength);
     void clear_effects();
     void load_crystal_texture(const shared::ResourceManager& resources);
+    void load_supply_textures(const shared::ResourceManager& resources);
     void load_bag_atlas(const shared::ResourceManager& resources);
     void load_health_bar_atlas(const shared::ResourceManager& resources);
     void load_particle_atlas(const shared::ResourceManager& resources);
@@ -215,6 +230,10 @@ private:
     bgfx::TextureHandle white_texture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle crystal_texture_ = BGFX_INVALID_HANDLE;
     bool crystal_ready_ = false;
+    bgfx::TextureHandle health_supply_texture_ = BGFX_INVALID_HANDLE;
+    bool health_supply_ready_ = false;
+    bgfx::TextureHandle damage_supply_texture_ = BGFX_INVALID_HANDLE;
+    bool damage_supply_ready_ = false;
     bgfx::TextureHandle bag_texture_ = BGFX_INVALID_HANDLE;
     core::Atlas bag_atlas_;
     bool bag_ready_ = false;
@@ -250,6 +269,7 @@ private:
     bool original_ready_ = false;
     HeroArtMode hero_art_mode_ = HeroArtMode::Auto;
     bool blood_enabled_ = true;
+    bool ballistic_preview_ = false;
     std::unordered_map<std::uint32_t, PlayerVisualState> visuals_;
     std::unordered_map<std::uint32_t, ProjectileVisual> projectile_visuals_;
     std::vector<EffectVisual> effects_;

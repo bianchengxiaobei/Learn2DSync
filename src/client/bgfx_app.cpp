@@ -505,7 +505,7 @@ int run_client(const ClientOptions& options) {
     core::GameMode active_game_mode = options.game_mode;
     if (!options.connect &&
         active_game_mode == core::GameMode::Control &&
-        !map.objective.has_value()) {
+        !map.has_control_objective()) {
         NSYNC_LOG_ERROR(
             "client",
             "control mode requires a map objective");
@@ -1389,9 +1389,14 @@ int run_client(const ClientOptions& options) {
         previous_local == nullptr ? 0 : previous_local->carried_drops;
     std::uint16_t previous_delivered =
         previous_local == nullptr ? 0 : previous_local->crystals_delivered;
+    std::uint16_t previous_supply_heal =
+        previous_local == nullptr ? 0 : previous_local->supply_heal_ticks;
+    std::uint16_t previous_damage_bonus =
+        previous_local == nullptr ? 0 : previous_local->damage_bonus_ticks;
     std::uint8_t previous_winner = world.winner();
     std::array<std::uint16_t, core::kMaxPlayers> previous_ammo{};
     std::array<std::uint16_t, core::kMaxPlayers> previous_reload_timer{};
+    std::array<std::uint16_t, core::kMaxPlayers> previous_fire_cooldown{};
     std::array<bool, core::kMaxPlayers> previous_audio_alive{};
     std::array<float, core::kMaxPlayers> footstep_timers{};
     std::unordered_map<std::uint32_t, core::Projectile>
@@ -1400,6 +1405,7 @@ int run_client(const ClientOptions& options) {
         if (player.slot < core::kMaxPlayers) {
             previous_ammo[player.slot] = player.ammo;
             previous_reload_timer[player.slot] = player.reload_timer;
+            previous_fire_cooldown[player.slot] = player.fire_cooldown;
             previous_audio_alive[player.slot] = player.alive != 0;
         }
     });
@@ -1501,7 +1507,7 @@ int run_client(const ClientOptions& options) {
             return false;
         }
         if (active_game_mode == core::GameMode::Control &&
-            !next_map.objective.has_value()) {
+            !next_map.has_control_objective()) {
             NSYNC_LOG_WARN(
                 "client",
                 "hot reload: control mode requires a map objective");
@@ -1556,6 +1562,7 @@ int run_client(const ClientOptions& options) {
         previous_ability_active.fill(false);
         previous_ammo.fill(0);
         previous_reload_timer.fill(0);
+        previous_fire_cooldown.fill(0);
         previous_audio_alive.fill(false);
         footstep_timers.fill(0.0f);
         previous_projectiles.clear();
@@ -1566,6 +1573,8 @@ int run_client(const ClientOptions& options) {
                 previous_player_alive[player.slot] = player.alive != 0;
                 previous_ammo[player.slot] = player.ammo;
                 previous_reload_timer[player.slot] = player.reload_timer;
+                previous_fire_cooldown[player.slot] =
+                    player.fire_cooldown;
                 previous_audio_alive[player.slot] = player.alive != 0;
                 streak_states[player.slot].kills = player.kills;
                 first_blood_seen =
@@ -1628,11 +1637,15 @@ int run_client(const ClientOptions& options) {
             previous_shield = local->shield;
             previous_alive = local->alive != 0;
             previous_weapon = local->weapon;
+            previous_supply_heal = local->supply_heal_ticks;
+            previous_damage_bonus = local->damage_bonus_ticks;
         } else {
             previous_health = 0;
             previous_shield = 0;
             previous_alive = false;
             previous_weapon = 0;
+            previous_supply_heal = 0;
+            previous_damage_bonus = 0;
         }
         previous_winner = direct_world.winner();
         sequence = 0;
@@ -1890,7 +1903,7 @@ int run_client(const ClientOptions& options) {
         } else if (action == "start") {
             if (menu_mode && ui_screen == UiScreen::Menu) {
                 if (active_game_mode == core::GameMode::Control &&
-                    !map.objective.has_value()) {
+                    !map.has_control_objective()) {
                     show_loading_error(
                         localization.text("loading.error_kicker"),
                         localization.text("error.control_objective"));
@@ -1911,7 +1924,7 @@ int run_client(const ClientOptions& options) {
             if (ui_screen == UiScreen::Menu && !online_mode && !net_mode &&
                 (value == "tdm" || value == "control" ||
                  value == "crystal")) {
-                if (value == "control" && !map.objective.has_value()) {
+                if (value == "control" && !map.has_control_objective()) {
                     show_loading_error(
                         localization.text("loading.error_kicker"),
                         localization.text("error.control_objective"));
@@ -2351,6 +2364,9 @@ int run_client(const ClientOptions& options) {
                     if (event.key.key == SDLK_F5 && !event.key.repeat) {
                         reload_requested = true;
                     }
+                    if (event.key.key == SDLK_F6 && !event.key.repeat) {
+                        world_renderer.toggle_ballistic_preview();
+                    }
                     if (!event.key.repeat &&
                         ui_screen == UiScreen::Match &&
                         event.key.scancode ==
@@ -2705,6 +2721,8 @@ int run_client(const ClientOptions& options) {
                     previous_shield = local->shield;
                     previous_alive = local->alive != 0;
                     previous_weapon = local->weapon;
+                    previous_supply_heal = local->supply_heal_ticks;
+                    previous_damage_bonus = local->damage_bonus_ticks;
                 }
             }
         }
@@ -2804,12 +2822,19 @@ int run_client(const ClientOptions& options) {
             if (current_local->crystals_delivered > previous_delivered) {
                 audio.play_at(AudioCue::CrystalDeliver, local_x, local_y);
             }
+            if (current_local->supply_heal_ticks > previous_supply_heal ||
+                current_local->damage_bonus_ticks >
+                    previous_damage_bonus) {
+                audio.play_at(AudioCue::CrystalPickup, local_x, local_y);
+            }
             previous_health = health;
             previous_shield = shield;
             previous_alive = current_local->alive != 0;
             previous_weapon = current_local->weapon;
             previous_carried = current_local->carried_drops;
             previous_delivered = current_local->crystals_delivered;
+            previous_supply_heal = current_local->supply_heal_ticks;
+            previous_damage_bonus = current_local->damage_bonus_ticks;
         }
         if (world.winner() != previous_winner) {
             if (world.winner() != 0) {
@@ -2847,6 +2872,21 @@ int run_client(const ClientOptions& options) {
                         y,
                         local_sound ? 0.7f : 0.55f);
                 }
+                if (player.alive != 0 &&
+                    previous_audio_alive[player.slot] &&
+                    player.ammo == previous_ammo[player.slot] &&
+                    player.reload_timer == 0 &&
+                    player.warmup_timer == 0 &&
+                    player.fire_cooldown >
+                        previous_fire_cooldown[player.slot] &&
+                    core::button_down(
+                        player.buttons, core::kButtonFire)) {
+                    audio.play_at(
+                        AudioCue::ProjectileImpact,
+                        x + static_cast<float>(player.facing) * 0.8f,
+                        y + 0.55f,
+                        local_sound ? 0.4f : 0.3f);
+                }
                 if (player.alive != 0 && !previous_audio_alive[player.slot]) {
                     audio.play_at(
                         AudioCue::Respawn,
@@ -2880,6 +2920,8 @@ int run_client(const ClientOptions& options) {
                 }
                 previous_ammo[player.slot] = player.ammo;
                 previous_reload_timer[player.slot] = player.reload_timer;
+                previous_fire_cooldown[player.slot] =
+                    player.fire_cooldown;
                 previous_audio_alive[player.slot] = player.alive != 0;
             });
 
@@ -3242,6 +3284,12 @@ int run_client(const ClientOptions& options) {
                 world.match_ticks() / core::kTickRate;
             match_model.local_alive =
                 local != nullptr && local->alive != 0;
+            match_model.local_damage_bonus_ticks =
+                local == nullptr ? 0 : local->damage_bonus_ticks;
+            match_model.local_supply_heal_ticks =
+                local == nullptr ? 0 : local->supply_heal_ticks;
+            match_model.local_shock_ticks =
+                local == nullptr ? 0 : local->stun_ticks;
             match_model.local_ammo =
                 local == nullptr ? 0 : local->ammo;
             match_model.local_health =
@@ -3305,21 +3353,70 @@ int run_client(const ClientOptions& options) {
                 : static_cast<std::uint32_t>(
                       (local->respawn_timer + core::kTickRate - 1) /
                       core::kTickRate);
-            match_model.objective_owner = world.objective_owner();
-            match_model.objective_capturing =
-                world.objective_capturing_team();
-            match_model.objective_progress_percent =
-                static_cast<int>(
-                    static_cast<std::uint32_t>(
-                        world.objective_progress()) *
-                    100U /
-                    core::kObjectiveCaptureTicks);
-            match_model.objective_score_percent =
-                static_cast<int>(
-                    static_cast<std::uint32_t>(
-                        world.objective_score_ticks()) *
-                    100U /
-                    core::kObjectiveScoreTicks);
+            const core::ControlPointState* focus = nullptr;
+            if (world.has_control_points() && !world.control_points().empty()) {
+                core::Fix32 best_distance =
+                    core::Fix32::from_raw(
+                        std::numeric_limits<std::int32_t>::max());
+                for (const core::ControlPointState& point :
+                     world.control_points()) {
+                    if (local == nullptr) {
+                        focus = focus == nullptr ? &point : focus;
+                        continue;
+                    }
+                    const core::Vec2 center =
+                        world.control_point_area(point).center();
+                    const core::Vec2 delta = center - local->position;
+                    const core::Fix32 distance = delta.length_sq();
+                    if (distance < best_distance) {
+                        best_distance = distance;
+                        focus = &point;
+                    }
+                }
+            }
+            if (focus != nullptr) {
+                const std::int16_t capture_ticks =
+                    world.control_point_capture_ticks(*focus);
+                const std::int16_t ticks = focus->ticks;
+                const std::int32_t magnitude =
+                    ticks < 0 ? -ticks : ticks;
+                match_model.objective_owner = world.point_owner(*focus);
+                match_model.objective_capturing =
+                    ticks > 0 ? 1 : (ticks < 0 ? 2 : 0);
+                match_model.objective_progress_percent = capture_ticks > 0
+                    ? static_cast<int>(
+                          static_cast<std::uint32_t>(magnitude) * 100U /
+                          static_cast<std::uint32_t>(capture_ticks))
+                    : 0;
+                const std::uint16_t score_ticks =
+                    world.control_point_score_ticks_needed(*focus);
+                match_model.objective_score_percent = score_ticks > 0
+                    ? static_cast<int>(
+                          static_cast<std::uint32_t>(focus->hold_ticks) *
+                          100U / score_ticks)
+                    : 0;
+            } else {
+                const std::int16_t capture_ticks =
+                    world.objective_capture_ticks();
+                match_model.objective_owner = world.objective_owner();
+                match_model.objective_capturing =
+                    world.objective_capturing_team();
+                match_model.objective_progress_percent = capture_ticks > 0
+                    ? static_cast<int>(
+                          static_cast<std::uint32_t>(
+                              world.objective_progress()) *
+                          100U /
+                          static_cast<std::uint32_t>(capture_ticks))
+                    : 0;
+                const std::uint16_t score_ticks =
+                    world.objective_score_ticks_needed();
+                match_model.objective_score_percent = score_ticks > 0
+                    ? static_cast<int>(
+                          static_cast<std::uint32_t>(
+                              world.objective_score_ticks()) *
+                          100U / score_ticks)
+                    : 0;
+            }
             match_model.local_carried =
                 local == nullptr ? 0 : local->carried_drops;
             match_model.depot_progress_percent = 0;

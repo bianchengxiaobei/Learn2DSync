@@ -711,8 +711,12 @@ void RealServer::handle_input(
         ++stats_.rejected_malformed_inputs;
         return;
     }
+    constexpr std::uint32_t kAcceptedButtons =
+        0x00FFU |
+        static_cast<std::uint32_t>(core::kButtonGadget2) |
+        static_cast<std::uint32_t>(core::kButtonGadget3);
     if (input.slot != session.slot ||
-        (input.buttons & ~0x00FFU) != 0 ||
+        (static_cast<std::uint32_t>(input.buttons) & ~kAcceptedButtons) != 0 ||
         (input.actions & 0x8000U) != 0) {
         ++stats_.rejected_inputs;
         ++stats_.rejected_slot_inputs;

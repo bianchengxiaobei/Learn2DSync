@@ -115,6 +115,9 @@ struct UiMatchModel {
     int objective_score_percent = 0;
     int local_carried = 0;
     int depot_progress_percent = 0;
+    int local_damage_bonus_ticks = 0;
+    int local_supply_heal_ticks = 0;
+    int local_shock_ticks = 0;
     int fps = 0;
     float damage_flash = 0.0f;
     std::string net_status;
@@ -275,6 +278,7 @@ private:
     Rml::Element* hud_weapon_ = nullptr;
     Rml::Element* hud_ammo_ = nullptr;
     Rml::Element* hud_vitals_ = nullptr;
+    Rml::Element* hud_buff_ = nullptr;
     Rml::Element* hud_death_ = nullptr;
     Rml::Element* hud_death_timer_ = nullptr;
     Rml::Element* hud_net_ = nullptr;

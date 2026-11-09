@@ -280,13 +280,15 @@ int run_loopback(
         return 1;
     }
     if (mode == nsync::core::GameMode::Control) {
-        map.objective = nsync::core::AABB{
+        nsync::core::Objective objective;
+        objective.area = nsync::core::AABB{
             nsync::core::Vec2{
                 nsync::core::Fix32::from_int(-2),
                 nsync::core::Fix32::from_int(9)},
             nsync::core::Vec2{
                 nsync::core::Fix32::from_int(2),
                 nsync::core::Fix32::from_int(11)}};
+        map.objective = objective;
     }
 
     NetServerConfig server_config;

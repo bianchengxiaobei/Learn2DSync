@@ -152,7 +152,7 @@ int run_network_server(const ServerOptions& options) {
             return 1;
         }
         if (config.game_mode == core::GameMode::Control &&
-            !map.objective.has_value()) {
+            !map.has_control_objective()) {
             NSYNC_LOG_ERROR(
                 "server",
                 "map ",

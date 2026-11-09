@@ -29,6 +29,12 @@ struct Player {
     std::uint16_t invulnerable_ticks = 0;
     std::uint16_t heal_ticks = 0;
     std::uint16_t heal_interval = 0;
+    std::uint16_t supply_heal_ticks = 0;
+    std::uint16_t supply_heal_interval = 0;
+    std::uint16_t supply_heal_period = 0;
+    std::uint16_t supply_heal_amount = 0;
+    std::uint16_t damage_bonus_ticks = 0;
+    Fix32 damage_bonus{};
     std::uint16_t slow_ticks = 0;
     std::uint16_t stun_ticks = 0;
     std::uint8_t gadget_latch = 0;
@@ -70,6 +76,21 @@ struct Drop {
     std::uint16_t vacant_ticks = 0;
     std::uint8_t drop_type = 0;
     std::uint8_t state = 0;
+};
+
+// A static supply item spawned by a map SupplySpawner.  The original game
+// spawns one item per generator at a time; `spawner` is the index into
+// Map::supply_spawners and `type` the index into ContentDatabase supplies.
+struct SupplyInstance {
+    std::uint8_t spawner = 0;
+    std::uint8_t type = 0;
+    Vec2 position{};
+};
+
+// Per-generator countdown.  A zero timer with no active item starts the
+// respawn delay; the timer counts down in engine ticks.
+struct SupplySpawnerState {
+    std::uint32_t timer = 0;
 };
 
 struct Projectile {

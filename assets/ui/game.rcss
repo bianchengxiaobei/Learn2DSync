@@ -746,6 +746,16 @@ button.ghost:hover {
     text-align: right;
 }
 
+#hud-buff {
+    margin-left: 10px;
+    color: #ff858b;
+    font-size: 11px;
+}
+
+#hud-buff.shock {
+    color: #9fe8ff;
+}
+
 .bar.health {
     height: 14px;
     margin: 8px 0 4px 0;

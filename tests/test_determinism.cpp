@@ -781,12 +781,55 @@ void test_gadgets() {
             CHECK(projectile.stun_ticks ==
                   hero_gadget_stats(HeroType::Gunner, 1).effect_ticks);
             CHECK(projectile.half_size == Fix32::from_ratio(13, 10));
+            CHECK(projectile.blast_self_ratio == Fix32::zero());
             CHECK(projectile.blast_friend_ratio == Fix32::zero());
             CHECK(projectile.explode_on_expire == 1);
             const Vec2 spawn = projectile.position - projectile.velocity;
             CHECK(Fix32::abs(spawn.x - shield_user->position.x) <
                   Fix32::from_ratio(1, 100));
         });
+    }
+
+    World shield_follow;
+    shield_follow.set_map(arena);
+    shield_follow.reset(1, 2);
+    Player* shield_caster =
+        shield_follow.players().get(EntityId::make(0, 1));
+    Player* shield_enemy =
+        shield_follow.players().get(EntityId::make(1, 1));
+    CHECK(shield_caster != nullptr);
+    CHECK(shield_enemy != nullptr);
+    if (shield_caster != nullptr && shield_enemy != nullptr) {
+        shield_caster->hero = static_cast<std::uint8_t>(HeroType::Gunner);
+        InputFrame press;
+        PlayerCommand command;
+        command.entity = shield_caster->id;
+        command.command.tick = shield_follow.tick();
+        command.command.buttons = kButtonGadget2;
+        press.commands.push_back(command);
+        shield_follow.step(press);
+        CHECK(shield_follow.projectiles().size() == 1);
+        shield_caster->position.x += Fix32::from_int(2);
+        shield_follow.step(empty);
+        shield_follow.projectiles().for_each([&](const Projectile& projectile) {
+            CHECK(Fix32::abs(
+                      projectile.position.x - shield_caster->position.x) <
+                  Fix32::from_ratio(1, 100));
+            CHECK(Fix32::abs(
+                      projectile.position.y - shield_caster->position.y) <
+                  Fix32::from_ratio(1, 100));
+        });
+        const Fix32 caster_health = shield_caster->health;
+        shield_enemy->position = shield_caster->position;
+        shield_enemy->shield = 0;
+        shield_follow.step(empty);
+        CHECK(shield_follow.projectiles().size() == 0);
+        CHECK(shield_caster->health == caster_health);
+        CHECK(shield_enemy->health ==
+              Fix32::from_int(
+                  hero_stats(static_cast<HeroType>(shield_enemy->hero))
+                      .health - 20));
+        CHECK(shield_enemy->stun_ticks > 0);
     }
 
     World kickstart;
@@ -852,6 +895,28 @@ void test_gadgets() {
             heal.step(empty);
         }
         CHECK(medic->health > before);
+    }
+
+    World injection;
+    injection.set_map(arena);
+    injection.reset(1, 1);
+    Player* injector = injection.players().get(EntityId::make(0, 1));
+    CHECK(injector != nullptr);
+    if (injector != nullptr) {
+        injector->hero = static_cast<std::uint8_t>(HeroType::Gunner);
+        injector->health = Fix32::from_int(20);
+        InputFrame press;
+        PlayerCommand command;
+        command.entity = injector->id;
+        command.command.tick = injection.tick();
+        command.command.buttons = kButtonGadget3;
+        press.commands.push_back(command);
+        injection.step(press);
+        CHECK(injector->health == Fix32::from_int(20));
+        for (int index = 0; index < 181; ++index) {
+            injection.step(empty);
+        }
+        CHECK(injector->health.to_int_round() == 104);
     }
 }
 void test_weapons_and_match() {
@@ -1555,6 +1620,22 @@ void test_warmup_and_reload() {
     }
     CHECK(reloader->ammo == shotgun.magazine);
     CHECK(reloader->reload_timer == 0);
+
+    reloader->ammo = static_cast<std::uint16_t>(shotgun.magazine - 1);
+    reloader->reload_timer = shotgun.reload_ticks;
+    reloader->fire_cooldown = 0;
+    reloader->fire_latch = 0;
+    InputFrame cancel_fire;
+    PlayerCommand cancel_command;
+    cancel_command.entity = reloader->id;
+    cancel_command.command.tick = reload.tick();
+    cancel_command.command.buttons = kButtonFire;
+    cancel_command.command.aim_x = 32767;
+    cancel_fire.commands.push_back(cancel_command);
+    const std::uint16_t ammo_before = reloader->ammo;
+    reload.step(cancel_fire);
+    CHECK(reloader->reload_timer == 0);
+    CHECK(reloader->ammo == static_cast<std::uint16_t>(ammo_before - 1));
 }
 void test_explosion_and_bounce() {
     using namespace nsync::core;
@@ -1632,7 +1713,12 @@ void test_explosion_and_bounce() {
     grenade.step(throw_input);
     CHECK(grenade.projectiles().size() == 1);
     grenade.projectiles().for_each([&](const Projectile& projectile) {
-        CHECK(projectile.velocity.y < Fix32::zero());
+        // Aiming into the floor blocks the shot, so the shell starts at the
+        // thrower's centre (GunControllerImpl::shoot) and falls from there
+        // instead of being reflected off the spawn sweep.
+        CHECK(near_raw(projectile.origin.x, thrower->position.x, 2048));
+        CHECK(near_raw(projectile.origin.y, thrower->position.y, 2048));
+        CHECK(projectile.velocity.y > Fix32::zero());
         CHECK(projectile.terrain_bounces <=
               weapon_stats(WeaponType::Grenade).terrain_bounces);
         CHECK(projectile.explode_on_expire == 1);
@@ -1733,9 +1819,10 @@ void test_explosion_and_bounce() {
 void test_objective_mode() {
     using namespace nsync::core;
     Map map = Map::default_arena();
-    map.objective = AABB{
-        Vec2{Fix32::from_int(-2), Fix32::from_int(9)},
-        Vec2{Fix32::from_int(2), Fix32::from_int(11)}};
+    map.objective = Objective{
+        AABB{
+            Vec2{Fix32::from_int(-2), Fix32::from_int(9)},
+            Vec2{Fix32::from_int(2), Fix32::from_int(11)}}};
 
     World world;
     world.set_map(map);
@@ -1767,7 +1854,7 @@ void test_objective_mode() {
     CHECK(world.objective_progress() == kObjectiveCaptureTicks - 1);
     world.step(empty);
     CHECK(world.objective_owner() == 1);
-    CHECK(world.objective_progress() == 0);
+    CHECK(world.objective_progress() == kObjectiveCaptureTicks);
     CHECK(world.scores()[0] == 0);
 
     for (int index = 0; index < static_cast<int>(kObjectiveScoreTicks) - 1;
@@ -1800,6 +1887,423 @@ void test_objective_mode() {
         world.step(empty);
     }
     CHECK(world.scores()[0] == score_before);
+}
+
+void test_original_control_map_objectives() {
+    using namespace nsync::core;
+    const auto load = [](const char* name) {
+        Map map;
+        std::string error;
+        const std::filesystem::path path =
+            std::filesystem::path(NSYNC_SOURCE_DIR) / "assets" / "maps" / name;
+        CHECK(load_map_file(path, map, &error));
+        CHECK(map.control_points.has_value());
+        return map;
+    };
+
+    const Map world5 = load("world5.json");
+    const ControlPointGenerator& gen5 = *world5.control_points;
+    CHECK(gen5.update_interval == 6);
+    CHECK(gen5.start_tick == 600);
+    CHECK(gen5.min_interval == 0);
+    CHECK(gen5.max_interval == 0);
+    CHECK(gen5.instance_limit == 3);
+    CHECK(gen5.capture_group_size == 4);
+    CHECK(gen5.points.size() == 1);
+    CHECK(gen5.points[0].capture_ticks == 20);
+    CHECK(gen5.points[0].score_ticks == 120);
+    CHECK(gen5.points[0].capture_score == 0);
+    CHECK(gen5.points[0].hold_score == 1);
+    CHECK(gen5.entries.size() == 3);
+
+    const std::vector<std::uint8_t> binary = encode_map_bin(world5);
+    CHECK(!binary.empty());
+    Map decoded;
+    std::string error;
+    CHECK(decode_map_bin(binary.data(), binary.size(), decoded, &error));
+    CHECK(decoded.control_points.has_value());
+    CHECK(decoded.control_points->entries.size() == 3);
+    CHECK(decoded.control_points->points[0].capture_ticks == 20);
+    CHECK(map_fingerprint(world5) == map_fingerprint(decoded));
+
+    const Map world6 = load("world6.json");
+    const ControlPointGenerator& gen6 = *world6.control_points;
+    CHECK(gen6.update_interval == 6);
+    CHECK(gen6.start_tick == 300);
+    CHECK(gen6.min_interval == 300);
+    CHECK(gen6.max_interval == 300);
+    CHECK(gen6.instance_limit == 2);
+    CHECK(gen6.capture_group_size == 2);
+    CHECK(gen6.points.size() == 1);
+    CHECK(gen6.points[0].capture_ticks == 40);
+    CHECK(gen6.points[0].score_ticks == 0);
+    CHECK(gen6.points[0].capture_score == 1);
+    CHECK(gen6.points[0].hold_score == 0);
+    CHECK(gen6.entries.size() == 9);
+
+    const Map world8 = load("world8.json");
+    const ControlPointGenerator& gen8 = *world8.control_points;
+    CHECK(gen8.instance_limit == 3);
+    CHECK(gen8.capture_group_size == 4);
+    CHECK(gen8.points[0].capture_ticks == 20);
+    CHECK(gen8.points[0].score_ticks == 120);
+}
+
+void test_objective_recapture_semantics() {
+    using namespace nsync::core;
+    Map map = Map::default_arena();
+    Objective objective;
+    objective.area = AABB{
+        Vec2{Fix32::from_int(-2), Fix32::from_int(9)},
+        Vec2{Fix32::from_int(2), Fix32::from_int(11)}};
+    objective.capture_ticks = 4;
+    objective.score_ticks = 0;
+    objective.capture_score = 1;
+    objective.hold_score = 0;
+    map.objective = objective;
+
+    World world;
+    world.set_map(map);
+    world.set_game_mode(GameMode::Control);
+    world.reset(1, 2);
+    world.set_match_rules(10000, 30);
+
+    Player* blue = world.players().get(EntityId::make(0, 1));
+    Player* red = world.players().get(EntityId::make(1, 1));
+    CHECK(blue != nullptr);
+    CHECK(red != nullptr);
+    if (blue == nullptr || red == nullptr) {
+        return;
+    }
+    const Vec2 center{
+        Fix32::zero(), Fix32::from_ratio(103, 10)};
+    blue->position = center;
+    blue->velocity = {};
+    red->position = map.spawns[5];
+    red->velocity = {};
+
+    InputFrame empty;
+    for (int index = 0; index < 4; ++index) {
+        world.step(empty);
+    }
+    CHECK(world.objective_owner() == 1);
+    CHECK(world.objective_progress() == 4);
+    CHECK(world.scores()[0] == 1);
+
+    // Standing on an already captured point must not capture it again.
+    world.step(empty);
+    CHECK(world.objective_owner() == 1);
+    CHECK(world.objective_progress() == 4);
+    CHECK(world.scores()[0] == 1);
+
+    // An enemy immediately clears ownership while unwinding the same counter;
+    // the bar shrinks from full instead of restarting at zero.  Like the
+    // original, the sign of the counter (not the pushing team) decides which
+    // side's bar is shown, so the shrinking bar is still team 1's.
+    blue->position = map.spawns[4];
+    blue->velocity = {};
+    red->position = center;
+    red->velocity = {};
+    world.step(empty);
+    CHECK(world.objective_owner() == kObjectiveNeutral);
+    CHECK(world.objective_capturing_team() == 1);
+    CHECK(world.objective_progress() == 3);
+
+    // Empty points keep their progress (the original never decays).
+    red->position = map.spawns[5];
+    red->velocity = {};
+    world.step(empty);
+    CHECK(world.objective_owner() == kObjectiveNeutral);
+    CHECK(world.objective_progress() == 3);
+
+    for (int index = 0; index < 10; ++index) {
+        red->position = center;
+        red->velocity = {};
+        world.step(empty);
+    }
+    CHECK(world.objective_owner() == 2);
+    CHECK(world.objective_capturing_team() == 2);
+    CHECK(world.objective_progress() == 4);
+    CHECK(world.scores()[1] == 1);
+}
+
+void test_control_point_generator() {
+    using namespace nsync::core;
+    Map map = Map::default_arena();
+    ControlPointGenerator generator;
+    generator.update_interval = 1;
+    generator.start_tick = 0;
+    generator.min_interval = 0;
+    generator.max_interval = 0;
+    generator.instance_limit = 2;
+    generator.capture_group_size = 2;
+    ControlPointDef def;
+    def.dimensions = Vec2{Fix32::from_int(2), Fix32::from_int(2)};
+    def.capture_ticks = 2;
+    def.score_ticks = 0;
+    def.capture_score = 1;
+    def.hold_score = 0;
+    generator.points.push_back(def);
+    generator.entries.push_back(Vec2{
+        Fix32::from_int(-6), Fix32::from_ratio(103, 10)});
+    generator.entries.push_back(Vec2{
+        Fix32::from_int(6), Fix32::from_ratio(103, 10)});
+    map.control_points = generator;
+
+    World world;
+    world.set_map(map);
+    world.set_game_mode(GameMode::Control);
+    world.reset(1, 4);
+    world.set_match_rules(10000, 30);
+
+    Player* blue0 = world.players().get(EntityId::make(0, 1));
+    Player* red0 = world.players().get(EntityId::make(1, 1));
+    Player* blue1 = world.players().get(EntityId::make(2, 1));
+    Player* red1 = world.players().get(EntityId::make(3, 1));
+    CHECK(blue0 != nullptr);
+    CHECK(red0 != nullptr);
+    CHECK(blue1 != nullptr);
+    CHECK(red1 != nullptr);
+    if (blue0 == nullptr || red0 == nullptr ||
+        blue1 == nullptr || red1 == nullptr) {
+        return;
+    }
+    const Vec2 point_a{
+        Fix32::from_int(-6), Fix32::from_ratio(103, 10)};
+    const Vec2 point_b{
+        Fix32::from_int(6), Fix32::from_ratio(103, 10)};
+    blue0->position = point_a;
+    blue0->velocity = {};
+    blue1->position = Vec2{Fix32::from_int(2), Fix32::from_int(4)};
+    blue1->velocity = {};
+    red0->position = Vec2{Fix32::zero(), Fix32::from_int(2)};
+    red0->velocity = {};
+    red1->position = Vec2{Fix32::zero(), Fix32::from_int(4)};
+    red1->velocity = {};
+
+    InputFrame empty;
+    world.step(empty);
+    CHECK(world.control_points().size() == 2);
+
+    // One captured point alone does not score or recycle until the group is
+    // complete (world6 uses capture_group_size = 2).
+    for (int index = 0; index < 2; ++index) {
+        world.step(empty);
+    }
+    CHECK(world.scores()[0] == 0);
+    CHECK(world.control_points().size() == 2);
+    int owned = 0;
+    int neutral = 0;
+    for (const ControlPointState& point : world.control_points()) {
+        const std::uint8_t owner = world.point_owner(point);
+        if (owner == 1) {
+            ++owned;
+        } else if (owner == 0) {
+            ++neutral;
+        }
+    }
+    CHECK(owned == 1);
+    CHECK(neutral == 1);
+
+    blue1->position = point_b;
+    blue1->velocity = {};
+    for (int index = 0; index < 2; ++index) {
+        world.step(empty);
+    }
+    CHECK(world.scores()[0] == 2);
+    CHECK(world.control_points().size() == 2);
+    for (const ControlPointState& point : world.control_points()) {
+        CHECK(point.ticks == 0);
+    }
+
+    Map delayed_map = map;
+    delayed_map.control_points->start_tick = 5;
+    delayed_map.control_points->update_interval = 2;
+    World delayed;
+    delayed.set_map(delayed_map);
+    delayed.set_game_mode(GameMode::Control);
+    delayed.reset(1, 2);
+    for (int index = 0; index < 6; ++index) {
+        delayed.step(empty);
+    }
+    CHECK(delayed.control_points().empty());
+    delayed.step(empty);
+    CHECK(delayed.control_points().size() == 2);
+
+    // Hold scoring is counted in engine ticks even though the generator only
+    // updates every `update_interval` ticks.
+    Map hold_map = map;
+    hold_map.control_points->update_interval = 2;
+    hold_map.control_points->instance_limit = 1;
+    hold_map.control_points->capture_group_size = 0;
+    hold_map.control_points->entries.resize(1);
+    hold_map.control_points->points[0].capture_ticks = 1;
+    hold_map.control_points->points[0].score_ticks = 4;
+    hold_map.control_points->points[0].capture_score = 0;
+    hold_map.control_points->points[0].hold_score = 1;
+    World hold_world;
+    hold_world.set_map(hold_map);
+    hold_world.set_game_mode(GameMode::Control);
+    hold_world.reset(1, 2);
+    hold_world.set_match_rules(10000, 30);
+    Player* holder = hold_world.players().get(EntityId::make(0, 1));
+    Player* enemy = hold_world.players().get(EntityId::make(1, 1));
+    CHECK(holder != nullptr);
+    CHECK(enemy != nullptr);
+    if (holder == nullptr || enemy == nullptr) {
+        return;
+    }
+    holder->position = hold_map.control_points->entries[0];
+    holder->velocity = {};
+    enemy->position = Vec2{Fix32::zero(), Fix32::from_int(2)};
+    enemy->velocity = {};
+    for (int index = 0; index < 7; ++index) {
+        hold_world.step(empty);
+    }
+    CHECK(hold_world.scores()[0] == 1);
+}
+
+void test_supplies() {
+    using namespace nsync::core;
+    Map map = Map::default_arena();
+    const Vec2 spawn = map.spawns[0];
+    const Vec2 far{
+        spawn.x + Fix32::from_int(8),
+        spawn.y};
+    map.supply_spawners = {
+        SupplySpawner{{"health_box"}, {spawn}, 1, 60, 60},
+        SupplySpawner{{"double_damage"}, {far}, 1, 60, 60},
+    };
+
+    World world;
+    world.set_map(map);
+    world.reset(7, 1);
+    Player* player = world.players().get(EntityId::make(0, 1));
+    CHECK(player != nullptr);
+    if (player == nullptr) {
+        return;
+    }
+    player->health = Fix32::from_int(50);
+    world.step(InputFrame{});
+    CHECK(world.supplies().size() == 1);
+    CHECK(player->health == Fix32::from_int(70));
+    CHECK(player->supply_heal_ticks == 900);
+    CHECK(player->supply_heal_amount == 75);
+    CHECK(player->supply_heal_period == 30);
+
+    WorldSnapshot snapshot;
+    world.save(snapshot);
+    CHECK(snapshot.supplies.size() == 1);
+    CHECK(snapshot.supply_spawners.size() == 2);
+    const std::vector<std::uint8_t> encoded = encode_snapshot(snapshot);
+    WorldSnapshot decoded;
+    std::string error;
+    CHECK(decode_snapshot(encoded, decoded, &error));
+    CHECK(decoded.supplies.size() == 1);
+    CHECK(snapshot_hash(decoded) == snapshot_hash(snapshot));
+    CHECK(world.restore(decoded, &error));
+    CHECK(world.hash() == snapshot_hash(snapshot));
+
+    player = world.players().get(EntityId::make(0, 1));
+    CHECK(player != nullptr);
+    if (player == nullptr) {
+        return;
+    }
+    player->position = far;
+    player->velocity = {};
+    world.step(InputFrame{});
+    CHECK(world.supplies().empty());
+    CHECK(player->damage_bonus == Fix32::one());
+    CHECK(player->damage_bonus_ticks == 600);
+
+    // The pump heals every interval until the buff expires or hp is full.
+    const int before = player->health.raw() / Fix32::kOne;
+    for (int tick = 0; tick < 30; ++tick) {
+        world.step(InputFrame{});
+    }
+    CHECK(player->health.raw() / Fix32::kOne > before);
+
+    // Real imported map: the first generator must produce a health box.
+    Map real;
+    const std::filesystem::path path =
+        std::filesystem::path(NSYNC_SOURCE_DIR) / "assets" / "maps" /
+        "crystal_01.json";
+    CHECK(load_map_file(path, real, &error));
+    CHECK(real.supply_spawners.size() == 5);
+    if (real.supply_spawners.empty()) {
+        return;
+    }
+    World imported;
+    imported.set_map(real);
+    imported.set_game_mode(GameMode::Crystal);
+    imported.reset(3, 1);
+    Player* imported_player =
+        imported.players().get(EntityId::make(0, 1));
+    CHECK(imported_player != nullptr);
+    if (imported_player == nullptr) {
+        return;
+    }
+    for (std::uint32_t tick = 0;
+         tick < real.supply_spawners[0].start_tick + 5 &&
+         imported.supplies().empty();
+         ++tick) {
+        imported.step(InputFrame{});
+    }
+    CHECK(!imported.supplies().empty());
+    if (imported.supplies().empty()) {
+        return;
+    }
+    imported_player->position = imported.supplies()[0].position;
+    imported_player->velocity = {};
+    imported_player->health = Fix32::from_int(50);
+    imported.step(InputFrame{});
+    CHECK(imported_player->health == Fix32::from_int(70));
+    CHECK(imported.supplies().size() == 0);
+
+    // double_damage doubles outgoing weapon damage.
+    const auto fire_once = [](bool boosted) {
+        World damage_world;
+        damage_world.set_map(Map::default_arena());
+        damage_world.reset(11, 2);
+        damage_world.step(InputFrame{});
+        Player* attacker = nullptr;
+        Player* target = nullptr;
+        damage_world.players().for_each([&](Player& player) {
+            if (player.slot == 0) {
+                attacker = &player;
+            } else if (player.slot == 1) {
+                target = &player;
+            }
+        });
+        if (attacker == nullptr || target == nullptr) {
+            return -1;
+        }
+        const Vec2 point{Fix32::zero(), Fix32::from_ratio(101, 10)};
+        attacker->position = point;
+        attacker->aim = Vec2{Fix32::one(), Fix32::zero()};
+        attacker->facing = 1;
+        target->position = point;
+        target->shield = 0;
+        target->health = Fix32::from_int(100);
+        if (boosted) {
+            attacker->damage_bonus = Fix32::one();
+            attacker->damage_bonus_ticks = 600;
+        }
+        const Fix32 before = target->health;
+        InputFrame fire;
+        PlayerCommand command;
+        command.entity = attacker->id;
+        command.command.tick = damage_world.tick();
+        command.command.buttons = kButtonFire;
+        command.command.aim_x = 32767;
+        fire.commands.push_back(command);
+        damage_world.step(fire);
+        return (before - target->health).raw() / Fix32::kOne;
+    };
+    const int normal_damage = fire_once(false);
+    const int boosted_damage = fire_once(true);
+    CHECK(normal_damage > 0);
+    CHECK(boosted_damage == normal_damage * 2);
 }
 
 void test_snapshot_restore() {
@@ -2182,6 +2686,135 @@ void test_grenade_bounce_policy() {
     CHECK(removed);
 }
 
+void test_grenade_enemy_detonation() {
+    using namespace nsync::core;
+    Map map;
+    map.id = "grenade_enemy_test";
+    map.bounds = AABB{
+        Vec2{Fix32::from_int(-20), Fix32::zero()},
+        Vec2{Fix32::from_int(20), Fix32::from_int(24)}};
+    map.solids = {AABB{
+        Vec2{Fix32::from_int(-20), Fix32::from_int(13)},
+        Vec2{Fix32::from_int(20), Fix32::from_int(14)}}};
+    map.spawns.fill(Vec2{Fix32::zero(), Fix32::from_ratio(123, 10)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 2);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    Player* enemy = world.players().get(EntityId::make(1, 1));
+    CHECK(shooter != nullptr);
+    CHECK(enemy != nullptr);
+    if (shooter == nullptr || enemy == nullptr) {
+        return;
+    }
+    shooter->position = Vec2{Fix32::zero(), Fix32::from_ratio(123, 10)};
+    shooter->velocity = {};
+    shooter->health = Fix32::from_int(100);
+    shooter->shield = 0;
+    shooter->shield_regen_delay = 1000;
+    shooter->invulnerable_ticks = 0;
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    enemy->position = Vec2{
+        Fix32::from_ratio(35, 10), Fix32::from_ratio(123, 10)};
+    enemy->velocity = {};
+    enemy->health = Fix32::from_int(100);
+    enemy->shield = 0;
+    enemy->shield_regen_delay = 1000;
+    enemy->invulnerable_ticks = 0;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 32767;
+    command.command.aim_y = 0;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+
+    bool removed = false;
+    for (int tick = 0; tick < 90 && !removed; ++tick) {
+        world.step(InputFrame{});
+        removed = world.projectiles().empty();
+    }
+    CHECK(removed);
+    CHECK(enemy->health < Fix32::from_int(100));
+}
+
+void test_grenade_wall_bounce_no_detonate() {
+    using namespace nsync::core;
+    Map map;
+    map.id = "grenade_wall_test";
+    map.bounds = AABB{
+        Vec2{Fix32::from_int(-20), Fix32::zero()},
+        Vec2{Fix32::from_int(20), Fix32::from_int(24)}};
+    map.solids = {AABB{
+        Vec2{Fix32::from_int(4), Fix32::zero()},
+        Vec2{Fix32::from_int(5), Fix32::from_int(24)}}};
+    map.spawns.fill(Vec2{Fix32::zero(), Fix32::from_int(12)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 2);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    Player* enemy = world.players().get(EntityId::make(1, 1));
+    CHECK(shooter != nullptr);
+    CHECK(enemy != nullptr);
+    if (shooter == nullptr || enemy == nullptr) {
+        return;
+    }
+    shooter->position = Vec2{Fix32::zero(), Fix32::from_int(12)};
+    shooter->velocity = {};
+    shooter->health = Fix32::from_int(100);
+    shooter->shield = 0;
+    shooter->shield_regen_delay = 1000;
+    shooter->invulnerable_ticks = 0;
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    enemy->position = Vec2{Fix32::from_int(8), Fix32::from_int(12)};
+    enemy->velocity = {};
+    enemy->health = Fix32::from_int(100);
+    enemy->shield = 0;
+    enemy->shield_regen_delay = 1000;
+    enemy->invulnerable_ticks = 0;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 32767;
+    command.command.aim_y = 0;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+
+    bool bounced = false;
+    for (int tick = 0; tick < 30 && !bounced; ++tick) {
+        world.step(InputFrame{});
+        if (world.projectiles().empty()) {
+            break;
+        }
+        world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.velocity.x < Fix32::zero()) {
+                bounced = true;
+            }
+        });
+    }
+    CHECK(bounced);
+    CHECK(!world.projectiles().empty());
+    CHECK(enemy->health == Fix32::from_int(100));
+}
+
 void test_grenade_platform_edge() {
     using namespace nsync::core;
     Map map;
@@ -2505,6 +3138,502 @@ void test_golden_replay() {
     }
 }
 
+void test_grenade_platform_launch_spawn() {
+    using namespace nsync::core;
+    Map map;
+    std::string error;
+    const std::filesystem::path path =
+        std::filesystem::path(NSYNC_SOURCE_DIR) / "assets" / "maps" /
+        "world5.json";
+    CHECK(load_map_file(path, map, &error));
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 1);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    CHECK(shooter != nullptr);
+    if (shooter == nullptr) {
+        return;
+    }
+    // Stand on platform [55.93, 22.06, 7.48, 0.3] and aim down-right, the
+    // way the grenade launcher is normally fired while walking a ledge.
+    const Vec2 start{
+        Fix32::from_ratio(5651, 100), Fix32::from_ratio(2136, 100)};
+    shooter->position = start;
+    shooter->velocity = {};
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+    shooter->grounded = 1;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 19332;
+    command.command.aim_y = 26214;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+
+    const Fix32 platform_top = Fix32::from_ratio(2206, 100);
+    Vec2 origin{};
+    Vec2 velocity{};
+    world.projectiles().for_each([&](const Projectile& projectile) {
+        origin = projectile.origin;
+        velocity = projectile.velocity;
+    });
+    // The muzzle is buried in the platform, so the shot is blocked and the
+    // shell starts at the thrower's centre, matching GunControllerImpl::shoot.
+    CHECK(near_raw(origin.x, start.x, 2048));
+    CHECK(near_raw(origin.y, start.y, 2048));
+    // Firing right must keep travelling right.
+    CHECK(velocity.x > Fix32::zero());
+
+    InputFrame empty;
+    bool reversed = false;
+    bool sank = false;
+    for (int tick = 0; tick < 30; ++tick) {
+        world.step(empty);
+        world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.velocity.x < Fix32::zero()) {
+                reversed = true;
+            }
+            if (projectile.position.y > platform_top) {
+                sank = true;
+            }
+        });
+    }
+    // The shell bounces along the platform instead of being reflected or
+    // dropping through it (the old "air wall" behaviour).
+    CHECK(!reversed);
+    CHECK(!sank);
+}
+
+void test_border_segment_collision() {
+    using namespace nsync::core;
+    const Segment diagonal{
+        Vec2{Fix32::zero(), Fix32::zero()},
+        Vec2{Fix32::from_int(10), Fix32::from_int(10)}};
+
+    Fix32 hit_t{};
+    Vec2 normal{};
+    CHECK(swept_point_hits_segment(
+        Segment{
+            Vec2{Fix32::from_int(3), Fix32::from_int(2)},
+            Vec2{Fix32::from_int(5), Fix32::from_int(6)}},
+        diagonal,
+        Fix32::from_ratio(1, 5),
+        hit_t,
+        normal));
+    CHECK(normal.y < Fix32::zero());
+    CHECK(!swept_point_hits_segment(
+        Segment{
+            Vec2{Fix32::from_int(3), Fix32::from_int(2)},
+            Vec2{Fix32::from_int(5), Fix32::from_int(3)}},
+        diagonal,
+        Fix32::from_ratio(1, 5),
+        hit_t,
+        normal));
+
+    Map map;
+    map.id = "border_sweep_test";
+    map.bounds = AABB{
+        Vec2{Fix32::zero(), Fix32::zero()},
+        Vec2{Fix32::from_int(15), Fix32::from_int(15)}};
+    map.borders = {diagonal};
+    map.solids = {AABB{
+        Vec2{Fix32::from_ratio(444, 100), Fix32::from_ratio(444, 100)},
+        Vec2{Fix32::from_ratio(506, 100), Fix32::from_ratio(506, 100)}}};
+    map.spawns.fill(Vec2{Fix32::from_int(1), Fix32::from_int(1)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    const std::vector<std::uint8_t> binary = encode_map_bin(map);
+    CHECK(!binary.empty());
+    Map decoded;
+    CHECK(decode_map_bin(binary.data(), binary.size(), decoded, &error));
+    CHECK(decoded.borders.size() == 1);
+    CHECK(decoded.borders[0] == diagonal);
+
+    Map imported;
+    const std::filesystem::path path =
+        std::filesystem::path(NSYNC_SOURCE_DIR) / "assets" / "maps" /
+        "crystal_01.json";
+    CHECK(load_map_file(path, imported, &error));
+    CHECK(!imported.borders.empty());
+    CHECK(imported.borders.size() < imported.solids.size());
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 1);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    CHECK(shooter != nullptr);
+    if (shooter == nullptr) {
+        return;
+    }
+    shooter->position = Vec2{Fix32::from_int(4), Fix32::from_ratio(355, 100)};
+    shooter->velocity = {};
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 23170;
+    command.command.aim_y = 23170;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+
+    bool bounced = false;
+    bool advanced = false;
+    for (int tick = 0; tick < 8; ++tick) {
+        world.step(InputFrame{});
+        world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.velocity.x < Fix32::zero()) {
+                bounced = true;
+            }
+            if (projectile.position.x > Fix32::from_ratio(51, 10)) {
+                advanced = true;
+            }
+        });
+    }
+    CHECK(!bounced);
+    CHECK(advanced);
+
+    Map wall_map;
+    wall_map.id = "border_wall_test";
+    wall_map.bounds = AABB{
+        Vec2{Fix32::zero(), Fix32::zero()},
+        Vec2{Fix32::from_int(20), Fix32::from_int(20)}};
+    wall_map.borders = {Segment{
+        Vec2{Fix32::from_int(6), Fix32::zero()},
+        Vec2{Fix32::from_int(6), Fix32::from_int(20)}}};
+    wall_map.spawns.fill(Vec2{Fix32::from_int(1), Fix32::from_int(1)});
+    CHECK(wall_map.valid(&error));
+
+    World wall_world;
+    wall_world.set_map(wall_map);
+    wall_world.reset(1, 1);
+    Player* wall_shooter = wall_world.players().get(EntityId::make(0, 1));
+    CHECK(wall_shooter != nullptr);
+    if (wall_shooter == nullptr) {
+        return;
+    }
+    wall_shooter->position = Vec2{Fix32::from_int(2), Fix32::from_int(10)};
+    wall_shooter->velocity = {};
+    wall_shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    wall_shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    InputFrame wall_fire;
+    PlayerCommand wall_command;
+    wall_command.entity = wall_shooter->id;
+    wall_command.command.tick = wall_world.tick();
+    wall_command.command.buttons = kButtonFire;
+    wall_command.command.aim_x = 32767;
+    wall_command.command.aim_y = 0;
+    wall_fire.commands.push_back(wall_command);
+    wall_world.step(wall_fire);
+    CHECK(wall_world.projectiles().size() == 1);
+
+    bool wall_bounced = false;
+    Fix32 wall_hit_x{};
+    for (int tick = 0; tick < 40 && !wall_bounced; ++tick) {
+        wall_world.step(InputFrame{});
+        wall_world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.velocity.x < Fix32::zero()) {
+                wall_bounced = true;
+                wall_hit_x = projectile.position.x;
+            }
+        });
+    }
+    CHECK(wall_bounced);
+    CHECK(wall_hit_x >= Fix32::from_ratio(578, 100));
+    CHECK(wall_hit_x <= Fix32::from_ratio(582, 100));
+}
+
+void test_shell_endpoint_grazing() {
+    using namespace nsync::core;
+    Fix32 hit_t{};
+    Vec2 normal{};
+
+    const Segment wall{Vec2{Fix32::from_int(10), Fix32::from_int(10)},
+                       Vec2{Fix32::from_int(10), Fix32::from_int(11)}};
+    const Segment graze{Vec2{Fix32::from_ratio(981, 100),
+                             Fix32::from_ratio(95, 10)},
+                        Vec2{Fix32::from_ratio(981, 100),
+                             Fix32::from_ratio(105, 10)}};
+    CHECK(!swept_point_hits_segment(
+        graze, wall, Fix32::from_ratio(1, 5), hit_t, normal));
+
+    const Segment approach{Vec2{Fix32::from_ratio(96, 10),
+                                Fix32::from_int(10)},
+                           Vec2{Fix32::from_ratio(99, 10),
+                                Fix32::from_int(10)}};
+    CHECK(swept_point_hits_segment(
+        approach, wall, Fix32::from_ratio(1, 5), hit_t, normal));
+
+    const Segment floor{Vec2{Fix32::from_int(10), Fix32::from_int(10)},
+                        Vec2{Fix32::from_ratio(14, 1), Fix32::from_int(10)}};
+    const Segment rolling{Vec2{Fix32::from_ratio(135, 10),
+                               Fix32::from_ratio(98, 10)},
+                          Vec2{Fix32::from_ratio(145, 10),
+                               Fix32::from_ratio(98, 10)}};
+    CHECK(!swept_point_hits_segment(
+        rolling, floor, Fix32::from_ratio(1, 5), hit_t, normal));
+
+    const Segment falling{Vec2{Fix32::from_ratio(135, 10),
+                               Fix32::from_ratio(97, 10)},
+                          Vec2{Fix32::from_ratio(135, 10),
+                               Fix32::from_ratio(99, 10)}};
+    CHECK(swept_point_hits_segment(
+        falling, floor, Fix32::from_ratio(1, 5), hit_t, normal));
+
+    const Segment platform_top{
+        Vec2{Fix32::from_ratio(63606, 1000), Fix32::from_ratio(21218, 1000)},
+        Vec2{Fix32::from_ratio(55506, 1000), Fix32::from_ratio(21218, 1000)}};
+    const Segment from_below{
+        Vec2{Fix32::from_int(60), Fix32::from_ratio(217, 10)},
+        Vec2{Fix32::from_int(60), Fix32::from_ratio(213, 10)}};
+    CHECK(swept_point_hits_segment(
+        from_below, platform_top, Fix32::from_ratio(1, 5), hit_t, normal));
+    CHECK(!swept_point_hits_segment(
+        from_below,
+        platform_top,
+        Fix32::from_ratio(1, 5),
+        hit_t,
+        normal,
+        true));
+
+    const Segment from_above{
+        Vec2{Fix32::from_int(60), Fix32::from_ratio(209, 10)},
+        Vec2{Fix32::from_int(60), Fix32::from_ratio(211, 10)}};
+    CHECK(swept_point_hits_segment(
+        from_above,
+        platform_top,
+        Fix32::from_ratio(1, 5),
+        hit_t,
+        normal,
+        true));
+}
+
+void test_platform_shape_collision() {
+    using namespace nsync::core;
+    Map map;
+    map.id = "platform_shape_test";
+    map.bounds = AABB{
+        Vec2{Fix32::zero(), Fix32::zero()},
+        Vec2{Fix32::from_int(20), Fix32::from_int(20)}};
+    const std::array<Vec2, 4> plank{
+        Vec2{Fix32::from_int(10), Fix32::from_ratio(99, 10)},
+        Vec2{Fix32::from_int(12), Fix32::from_ratio(79, 10)},
+        Vec2{Fix32::from_ratio(121, 10), Fix32::from_int(8)},
+        Vec2{Fix32::from_ratio(101, 10), Fix32::from_int(10)}};
+    map.one_way_platforms = {AABB{
+        Vec2{Fix32::from_int(10), Fix32::from_ratio(79, 10)},
+        Vec2{Fix32::from_ratio(121, 10), Fix32::from_int(10)}}};
+    map.platform_shapes = {plank};
+    map.platform_hatchway = {1};
+    map.spawns.fill(Vec2{Fix32::from_int(2), Fix32::from_int(2)});
+    std::string error;
+    CHECK(map.valid(&error));
+
+    const std::vector<std::uint8_t> binary = encode_map_bin(map);
+    CHECK(!binary.empty());
+    Map decoded;
+    CHECK(decode_map_bin(binary.data(), binary.size(), decoded, &error));
+    CHECK(decoded.platform_shapes.size() == 1);
+    CHECK(decoded.platform_shapes[0] == plank);
+
+    World world;
+    world.set_map(map);
+    world.reset(1, 1);
+    Player* shooter = world.players().get(EntityId::make(0, 1));
+    CHECK(shooter != nullptr);
+    if (shooter == nullptr) {
+        return;
+    }
+    shooter->position = Vec2{Fix32::from_ratio(85, 10), Fix32::from_int(8)};
+    shooter->velocity = {};
+    shooter->weapon = static_cast<std::uint8_t>(WeaponType::Grenade);
+    shooter->ammo = weapon_stats(WeaponType::Grenade).magazine;
+
+    InputFrame fire;
+    PlayerCommand command;
+    command.entity = shooter->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonFire;
+    command.command.aim_x = 32767;
+    command.command.aim_y = 0;
+    fire.commands.push_back(command);
+    world.step(fire);
+    CHECK(world.projectiles().size() == 1);
+
+    bool bounced = false;
+    bool inside_box = false;
+    for (int tick = 0; tick < 9; ++tick) {
+        world.step(InputFrame{});
+        world.projectiles().for_each([&](const Projectile& projectile) {
+            if (projectile.velocity.x < Fix32::zero()) {
+                bounced = true;
+            }
+            if (projectile.position.x > Fix32::from_ratio(105, 10) &&
+                projectile.position.y > Fix32::from_ratio(79, 10) &&
+                projectile.position.y < Fix32::from_int(10)) {
+                inside_box = true;
+            }
+        });
+    }
+    CHECK(!bounced);
+    CHECK(inside_box);
+}
+
+void test_shock_blocks_actions() {
+    using namespace nsync::core;
+    World world;
+    world.set_map(Map::default_arena());
+    world.reset(1, 2);
+    world.step(InputFrame{});
+    Player* attacker = world.players().get(EntityId::make(0, 1));
+    Player* victim = world.players().get(EntityId::make(1, 1));
+    CHECK(attacker != nullptr);
+    CHECK(victim != nullptr);
+    if (attacker == nullptr || victim == nullptr) {
+        return;
+    }
+    attacker->hero = static_cast<std::uint8_t>(HeroType::Gunner);
+    attacker->position =
+        Vec2{Fix32::from_int(-5), Fix32::from_ratio(103, 10)};
+    attacker->velocity = {};
+    victim->position =
+        Vec2{Fix32::from_int(-4), Fix32::from_ratio(103, 10)};
+    victim->velocity = {};
+    victim->weapon = static_cast<std::uint8_t>(WeaponType::Smg);
+    victim->ammo = 10;
+    victim->reload_timer = 40;
+    victim->health = Fix32::from_int(100);
+    victim->shield = 0;
+    victim->invulnerable_ticks = 0;
+
+    InputFrame press;
+    PlayerCommand command;
+    command.entity = attacker->id;
+    command.command.tick = world.tick();
+    command.command.buttons = kButtonGadget2;
+    command.command.aim_x = 32767;
+    press.commands.push_back(command);
+    world.step(press);
+
+    int guard = 0;
+    while (victim->stun_ticks == 0 && guard < 60) {
+        world.step(InputFrame{});
+        ++guard;
+    }
+    CHECK(victim->stun_ticks > 0);
+    CHECK(victim->reload_timer == 0);
+
+    const std::uint8_t weapon_before = victim->weapon;
+    InputFrame held;
+    PlayerCommand held_command;
+    held_command.entity = victim->id;
+    held_command.command.buttons = static_cast<std::uint16_t>(
+        kButtonFire | kButtonReload | kButtonWeaponSwitch |
+        kButtonGadget2);
+    held_command.command.aim_x = 32767;
+    for (int tick = 0; tick < 12; ++tick) {
+        held_command.command.tick = world.tick();
+        held.commands.assign(1, held_command);
+        world.step(held);
+    }
+    CHECK(victim->stun_ticks > 0);
+    CHECK(victim->ammo == 10);
+    CHECK(victim->reload_timer == 0);
+    CHECK(victim->weapon == weapon_before);
+    CHECK(victim->gadget_cooldowns[1] == 0);
+    CHECK(world.projectiles().size() == 0);
+
+    guard = 0;
+    while (victim->stun_ticks > 0 && guard < 300) {
+        world.step(InputFrame{});
+        ++guard;
+    }
+    CHECK(victim->stun_ticks == 0);
+    CHECK(victim->weapon == weapon_before);
+    CHECK(victim->ammo == 10);
+
+    InputFrame resumed;
+    PlayerCommand resumed_command;
+    resumed_command.entity = victim->id;
+    resumed_command.command.buttons = kButtonFire;
+    resumed_command.command.aim_x = 32767;
+    for (int tick = 0; tick < 35; ++tick) {
+        resumed_command.command.tick = world.tick();
+        resumed.commands.assign(1, resumed_command);
+        world.step(resumed);
+    }
+    CHECK(victim->weapon == weapon_before);
+    CHECK(victim->ammo == 10);
+    for (int tick = 0; tick < 15; ++tick) {
+        resumed_command.command.tick = world.tick();
+        resumed.commands.assign(1, resumed_command);
+        world.step(resumed);
+    }
+    CHECK(victim->ammo < 10);
+
+    World cleanse;
+    cleanse.set_map(Map::default_arena());
+    cleanse.reset(1, 2);
+    cleanse.step(InputFrame{});
+    Player* caster = cleanse.players().get(EntityId::make(0, 1));
+    Player* cleanser = cleanse.players().get(EntityId::make(1, 1));
+    CHECK(caster != nullptr);
+    CHECK(cleanser != nullptr);
+    if (caster == nullptr || cleanser == nullptr) {
+        return;
+    }
+    caster->hero = static_cast<std::uint8_t>(HeroType::Gunner);
+    caster->position =
+        Vec2{Fix32::from_int(-5), Fix32::from_ratio(103, 10)};
+    caster->velocity = {};
+    cleanser->hero = static_cast<std::uint8_t>(HeroType::Grenadier);
+    cleanser->position =
+        Vec2{Fix32::from_int(-4), Fix32::from_ratio(103, 10)};
+    cleanser->velocity = {};
+    cleanser->health = Fix32::from_int(100);
+    cleanser->shield = 0;
+    cleanser->invulnerable_ticks = 0;
+    cleanse.step(InputFrame{});
+
+    InputFrame shield_press;
+    PlayerCommand shield_command;
+    shield_command.entity = caster->id;
+    shield_command.command.tick = cleanse.tick();
+    shield_command.command.buttons = kButtonGadget2;
+    shield_command.command.aim_x = 32767;
+    shield_press.commands.push_back(shield_command);
+    cleanse.step(shield_press);
+
+    guard = 0;
+    while (cleanser->stun_ticks == 0 && guard < 60) {
+        cleanse.step(InputFrame{});
+        ++guard;
+    }
+    CHECK(cleanser->stun_ticks > 0);
+
+    InputFrame cleanse_press;
+    PlayerCommand cleanse_command;
+    cleanse_command.entity = cleanser->id;
+    cleanse_command.command.tick = cleanse.tick();
+    cleanse_command.command.buttons = kButtonGadget3;
+    cleanse_press.commands.push_back(cleanse_command);
+    cleanse.step(cleanse_press);
+    CHECK(cleanser->stun_ticks == 0);
+    CHECK(cleanser->gadget_cooldowns[2] > 0);
+}
+
 } // namespace
 
 bool run_determinism_tests(const std::filesystem::path& root) {
@@ -2517,19 +3646,30 @@ bool run_determinism_tests(const std::filesystem::path& root) {
     test_byte_io();
     test_map();
     test_gadgets();
+    test_shock_blocks_actions();
     test_weapons_and_match();
     test_point_blank_weapon_hit();
     test_projectile_wall_and_point_blank();
     test_warmup_and_reload();
     test_explosion_and_bounce();
     test_grenade_bounce_policy();
+    test_grenade_enemy_detonation();
+    test_grenade_wall_bounce_no_detonate();
     test_grenade_platform_edge();
     test_grenade_upward_shot();
     test_grenade_flight_speed();
+    test_grenade_platform_launch_spawn();
+    test_border_segment_collision();
+    test_shell_endpoint_grazing();
+    test_platform_shape_collision();
     test_original_shell_rules();
     test_objective_mode();
+    test_original_control_map_objectives();
+    test_objective_recapture_semantics();
+    test_control_point_generator();
     test_crystal_mode();
     test_original_crystal_map();
+    test_supplies();
     test_snapshot_restore();
     test_replay_roundtrip(root);
     test_golden_replay();

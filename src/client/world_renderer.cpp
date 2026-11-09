@@ -1,4 +1,4 @@
-#include "client/world_renderer.h"
+﻿#include "client/world_renderer.h"
 
 #include "client/image_loader.h"
 #include "core/aim.h"
@@ -1078,10 +1078,72 @@ void draw_team_ring(
     }
 }
 
+void draw_shock_effect(
+    QuadBatch& batch,
+    const core::Player& player,
+    float seconds) {
+    const float x = to_float(player.position.x);
+    const float y = to_float(player.position.y) + 0.9f;
+    constexpr Color color{150, 230, 255, 255};
+    const float flicker = 0.62f + 0.38f * std::sin(seconds * 43.0f);
+    for (int ring = 0; ring < 2; ++ring) {
+        const float radius = 0.6f + 0.13f * static_cast<float>(ring);
+        constexpr int segments = 16;
+        for (int i = 0; i < segments; ++i) {
+            const float a0 =
+                static_cast<float>(i) * 2.0f * kPi /
+                static_cast<float>(segments);
+            const float a1 =
+                static_cast<float>(i + 1) * 2.0f * kPi /
+                static_cast<float>(segments);
+            const float wobble0 =
+                1.0f + 0.14f * std::sin(seconds * 21.0f + a0 * 3.0f);
+            const float wobble1 =
+                1.0f + 0.14f * std::sin(seconds * 21.0f + a1 * 3.0f);
+            batch.segment(
+                core::Vec2{
+                    from_float(x + std::cos(a0) * radius * wobble0),
+                    from_float(
+                        y + std::sin(a0) * radius * wobble0 * 0.55f)},
+                core::Vec2{
+                    from_float(x + std::cos(a1) * radius * wobble1),
+                    from_float(
+                        y + std::sin(a1) * radius * wobble1 * 0.55f)},
+                2.5f,
+                with_alpha(color, 0.45f * flicker));
+        }
+    }
+    for (int bolt = 0; bolt < 3; ++bolt) {
+        const float phase =
+            seconds * 11.0f + static_cast<float>(bolt) * 2.094f +
+            static_cast<float>(player.id.index());
+        const float base_x = x + std::sin(phase) * 0.34f;
+        core::Vec2 previous{
+            from_float(base_x), from_float(y - 0.95f)};
+        for (int step = 1; step <= 4; ++step) {
+            const float t = static_cast<float>(step) / 4.0f;
+            const float taper =
+                1.0f - std::abs(t * 2.0f - 1.0f);
+            const float jitter =
+                std::sin(phase * 3.1f + t * 17.0f) * 0.22f * taper;
+            const core::Vec2 next{
+                from_float(base_x + jitter),
+                from_float(y - 0.95f + t * 1.75f)};
+            batch.segment(
+                previous,
+                next,
+                2.0f,
+                with_alpha(color, 0.55f * flicker));
+            previous = next;
+        }
+    }
+}
+
 } // namespace
 
 bool WorldRenderer::initialize(const shared::ResourceManager& resources) {
     shutdown();
+    ballistic_preview_ = std::getenv("NSYNC_BALLISTIC_PREVIEW") != nullptr;
     const std::uint32_t white = 0xFFFFFFFFU;
     white_texture_ = bgfx::createTexture2D(
         1,
@@ -1146,6 +1208,58 @@ void WorldRenderer::load_crystal_texture(
     }
     crystal_texture_ = next;
     crystal_ready_ = true;
+}
+
+void WorldRenderer::load_supply_textures(
+    const shared::ResourceManager& resources) {
+    const auto load = [&](const char* path,
+                          bgfx::TextureHandle& handle,
+                          bool& ready) {
+        const auto bytes = resources.read(path);
+        if (!bytes) {
+            NSYNC_LOG_WARN("client", "supply sprite missing: ", path);
+            return;
+        }
+        RgbaImage image;
+        std::string error;
+        if (!load_rgba_image(
+                bytes->data(), bytes->size(), image, error)) {
+            NSYNC_LOG_WARN(
+                "client", "supply sprite decode failed: ", error);
+            return;
+        }
+        if (image.width <= 0 || image.height <= 0 ||
+            image.width > 0xFFFF || image.height > 0xFFFF) {
+            NSYNC_LOG_WARN("client", "supply sprite has invalid dimensions");
+            return;
+        }
+        const bgfx::TextureHandle next = bgfx::createTexture2D(
+            static_cast<std::uint16_t>(image.width),
+            static_cast<std::uint16_t>(image.height),
+            false,
+            1,
+            bgfx::TextureFormat::RGBA8,
+            BGFX_SAMPLER_U_CLAMP |
+                BGFX_SAMPLER_V_CLAMP |
+                BGFX_SAMPLER_MIP_POINT,
+            bgfx::copy(
+                image.pixels.data(),
+                static_cast<std::uint32_t>(image.pixels.size())));
+        if (!bgfx::isValid(next)) {
+            NSYNC_LOG_WARN(
+                "client", "supply sprite texture creation failed: ", path);
+            return;
+        }
+        if (bgfx::isValid(handle)) {
+            bgfx::destroy(handle);
+        }
+        handle = next;
+        ready = true;
+    };
+    load("sprites/health_box.png", health_supply_texture_,
+         health_supply_ready_);
+    load("sprites/double_damage.png", damage_supply_texture_,
+         damage_supply_ready_);
 }
 
 void WorldRenderer::load_bag_atlas(
@@ -1457,6 +1571,7 @@ void WorldRenderer::load_projectile_atlas(
 bool WorldRenderer::reload_visuals(
     const shared::ResourceManager& resources) {
     load_crystal_texture(resources);
+    load_supply_textures(resources);
     load_bag_atlas(resources);
     load_health_bar_atlas(resources);
     load_particle_atlas(resources);
@@ -2346,6 +2461,14 @@ void WorldRenderer::shutdown() {
         bgfx::destroy(crystal_texture_);
         crystal_texture_ = BGFX_INVALID_HANDLE;
     }
+    if (bgfx::isValid(health_supply_texture_)) {
+        bgfx::destroy(health_supply_texture_);
+        health_supply_texture_ = BGFX_INVALID_HANDLE;
+    }
+    if (bgfx::isValid(damage_supply_texture_)) {
+        bgfx::destroy(damage_supply_texture_);
+        damage_supply_texture_ = BGFX_INVALID_HANDLE;
+    }
     if (bgfx::isValid(bag_texture_)) {
         bgfx::destroy(bag_texture_);
         bag_texture_ = BGFX_INVALID_HANDLE;
@@ -2355,6 +2478,8 @@ void WorldRenderer::shutdown() {
         health_bar_texture_ = BGFX_INVALID_HANDLE;
     }
     crystal_ready_ = false;
+    health_supply_ready_ = false;
+    damage_supply_ready_ = false;
     bag_ready_ = false;
     bag_atlas_ = {};
     health_bar_ready_ = false;
@@ -2432,6 +2557,8 @@ void WorldRenderer::draw(
     std::vector<MapArtRange> map_art_ranges;
     std::vector<SpriteVertex> sprite_vertices;
     std::vector<SpriteVertex> crystal_vertices;
+    std::vector<SpriteVertex> health_supply_vertices;
+    std::vector<SpriteVertex> damage_supply_vertices;
     std::vector<SpriteVertex> bag_vertices;
     std::vector<SpriteVertex> health_bar_vertices;
     std::vector<SpriteVertex> original_vertices;
@@ -2444,6 +2571,8 @@ void WorldRenderer::draw(
     world_vertices.reserve(1024);
     sprite_vertices.reserve(512);
     crystal_vertices.reserve(128);
+    health_supply_vertices.reserve(32);
+    damage_supply_vertices.reserve(32);
     bag_vertices.reserve(64);
     health_bar_vertices.reserve(192);
     original_vertices.reserve(2048);
@@ -2456,6 +2585,10 @@ void WorldRenderer::draw(
     QuadBatch batch(render_camera, width, height, world_vertices);
     QuadBatch sprite_batch(render_camera, width, height, sprite_vertices);
     QuadBatch crystal_batch(render_camera, width, height, crystal_vertices);
+    QuadBatch health_supply_batch(
+        render_camera, width, height, health_supply_vertices);
+    QuadBatch damage_supply_batch(
+        render_camera, width, height, damage_supply_vertices);
     QuadBatch bag_batch(render_camera, width, height, bag_vertices);
     QuadBatch health_bar_batch(
         render_camera,
@@ -2547,12 +2680,43 @@ void WorldRenderer::draw(
             batch.rect(pad.bounds, kJumpPad);
         }
     }
-    if (world.game_mode() == core::GameMode::Control &&
-        map.objective.has_value()) {
-        const Color color = world.objective_owner() == 1
-            ? kObjectiveBlue
-            : (world.objective_owner() == 2 ? kObjectiveRed : kObjectiveNeutral);
-        batch.rect(*map.objective, color);
+    if (world.game_mode() == core::GameMode::Control) {
+        const auto draw_point = [&](const core::AABB& area,
+                                    std::int16_t ticks,
+                                    std::int16_t capture_ticks) {
+            const std::uint8_t team = ticks > 0
+                ? 1
+                : (ticks < 0 ? 2 : 0);
+            batch.rect(area, kObjectiveNeutral);
+            const std::int32_t magnitude = ticks < 0 ? -ticks : ticks;
+            if (capture_ticks <= 0 || magnitude == 0) {
+                return;
+            }
+            const core::Fix32 fraction = core::Fix32::from_ratio(
+                magnitude, capture_ticks);
+            core::AABB fill = area;
+            fill.max.y = area.min.y +
+                (area.max.y - area.min.y) * fraction;
+            batch.rect(
+                fill,
+                team == 1
+                    ? kObjectiveBlue
+                    : (team == 2 ? kObjectiveRed : kObjectiveNeutral));
+        };
+        if (world.has_control_points() && !world.control_points().empty()) {
+            for (const core::ControlPointState& point :
+                 world.control_points()) {
+                draw_point(
+                    world.control_point_area(point),
+                    point.ticks,
+                    world.control_point_capture_ticks(point));
+            }
+        } else if (map.objective.has_value()) {
+            draw_point(
+                map.objective->area,
+                static_cast<std::int16_t>(world.objective_progress()),
+                static_cast<std::int16_t>(world.objective_capture_ticks()));
+        }
     }
     const core::Player* local = world.players().get(local_player);
     if (world.game_mode() == core::GameMode::Crystal) {
@@ -2633,6 +2797,27 @@ void WorldRenderer::draw(
         }
     }
 
+    for (const core::SupplyInstance& supply : world.supplies()) {
+        const core::SupplyStats& stats =
+            core::content().supply(supply.type);
+        const bool health = stats.kind == core::SupplyKind::Health;
+        const core::Fix32 half = health
+            ? core::Fix32::from_ratio(5, 10)
+            : core::Fix32::from_ratio(65, 100);
+        const core::AABB box = core::AABB::from_center(
+            supply.position, core::Vec2{half, half});
+        if (health ? health_supply_ready_ : damage_supply_ready_) {
+            (health ? health_supply_batch : damage_supply_batch).sprite(
+                box, 0.0f, 0.0f, 1.0f, 1.0f,
+                Color{255, 255, 255, 255});
+        } else {
+            batch.rect(
+                box,
+                health ? Color{92, 220, 110, 255}
+                       : Color{232, 64, 64, 255});
+        }
+    }
+
     if (!map_art_ready_) {
         const core::Fix32 marker_half = core::Fix32::from_ratio(1, 5);
         for (const core::Vec2& spawn : map.spawns) {
@@ -2649,7 +2834,7 @@ void WorldRenderer::draw(
     const float local_y =
         local == nullptr ? 0.0f : to_float(local->position.y);
 
-    const auto render_projectiles = [&]() {
+    const auto render_projectiles = [&](float interpolation) {
     std::vector<std::uint32_t> live_projectiles;
     live_projectiles.reserve(32);
     const std::uint32_t projectile_tick = world.tick();
@@ -2657,41 +2842,74 @@ void WorldRenderer::draw(
         const std::uint32_t key = projectile.id.raw();
         live_projectiles.push_back(key);
         ProjectileVisual& visual = projectile_visuals_[key];
-        const core::Vec2 simulated_start =
-            projectile.position - projectile.velocity;
         if (visual.trail.empty()) {
             visual.start_tick = projectile_tick;
-            core::Vec2 visual_start = simulated_start;
+            // Launcher shells follow the original: the sprite sits exactly
+            // on the simulated position, so it bounces on the collision
+            // geometry.  Bullets still start their tracer at the drawn
+            // muzzle and blend onto the simulated path.
+            const bool arc_shell =
+                projectile.gadget == 0 && projectile.explosive != 0 &&
+                projectile.gravity > core::Fix32::zero();
+            core::Vec2 visual_start = projectile.origin;
             const auto owner_visual = visuals_.find(projectile.owner.raw());
-            if (owner_visual != visuals_.end() &&
+            if (!arc_shell && owner_visual != visuals_.end() &&
                 owner_visual->second.has_muzzle) {
                 visual_start = owner_visual->second.muzzle;
             }
-            visual.offset = visual_start - simulated_start;
+            visual.offset =
+                arc_shell ? core::Vec2{} : visual_start - projectile.origin;
             visual.trail.push_back(visual_start);
-            const core::Vec2 display_position =
-                projectile.position + visual.offset;
-            if (display_position != visual.trail.back()) {
-                visual.trail.push_back(display_position);
-            }
-        } else {
-            const core::Vec2 display_position =
-                projectile.position + visual.offset;
-            if (projectile_tick > visual.start_tick &&
-                visual.trail.back() != display_position) {
-                visual.trail.push_back(display_position);
+        }
+        visual.last_position = projectile.position + visual.offset;
+        // Shells also get the same fixed-step interpolation players use:
+        // without it a slow grenade steps a whole tick at a time (visible
+        // jitter at high frame rates).
+        if (!visual.has_render_position) {
+            visual.has_render_position = true;
+            visual.interp_tick = projectile_tick;
+            visual.interp_from = visual.last_position;
+            visual.interp_to = visual.last_position;
+            visual.render_position = visual.last_position;
+        } else if (visual.interp_tick != projectile_tick) {
+            // Commit the previous target to the trail once the next tick
+            // arrives.  The tip of the trail then follows the interpolated
+            // shell instead of jumping ahead of it.
+            if (visual.trail.empty() ||
+                visual.trail.back() != visual.interp_to) {
+                visual.trail.push_back(visual.interp_to);
                 if (visual.trail.size() > 10) {
                     visual.trail.erase(visual.trail.begin());
                 }
             }
+            visual.interp_tick = projectile_tick;
+            visual.interp_from = visual.render_position;
+            visual.interp_to = visual.last_position;
+            visual.offset = visual.offset * core::Fix32::from_ratio(1, 2);
         }
-        visual.last_position = projectile.position + visual.offset;
+        // Gravity shells are drawn at the simulated position: interpolating
+        // them makes the sprite lag one tick behind the collision, so a
+        // grenade visibly bounces before it touches a wall or a platform.
+        const core::Fix32 shot_interp =
+            projectile.gravity > core::Fix32::zero()
+            ? core::Fix32::one()
+            : from_float(interpolation);
+        visual.render_position =
+            visual.interp_from +
+            (visual.interp_to - visual.interp_from) * shot_interp;
         visual.explosion_radius = to_float(projectile.explosion_radius);
         visual.explosive = projectile.explosive;
         visual.gadget = projectile.gadget;
+        const bool static_shield =
+            projectile.gadget ==
+            static_cast<std::uint8_t>(core::GadgetType::StaticShield) + 1;
+        const bool gadget_grenade =
+            projectile.gadget ==
+            static_cast<std::uint8_t>(core::GadgetType::FragGrenade) + 1;
 
         const Color shot_color = projectile_color(projectile);
-        if (projectile.gadget != 0 && particle_atlas_ready_) {
+        if (projectile.gadget != 0 && particle_atlas_ready_ &&
+            !static_shield && !gadget_grenade) {
             visual.trail_accum += frame_delta;
             constexpr float kTrailInterval = 0.035f;
             static constexpr ParticleLayer kTrailLayer{
@@ -2703,8 +2921,8 @@ void WorldRenderer::draw(
                 visual.trail_accum -= kTrailInterval;
                 ParticleVisual particle;
                 particle.layer = &kTrailLayer;
-                particle.x = to_float(visual.last_position.x);
-                particle.y = to_float(visual.last_position.y);
+                particle.x = to_float(visual.render_position.x);
+                particle.y = to_float(visual.render_position.y);
                 particle.life = kTrailLayer.lifetime;
                 particle.size_start = kTrailLayer.size_start;
                 particle.size_end = kTrailLayer.size_end;
@@ -2722,18 +2940,46 @@ void WorldRenderer::draw(
                 : (projectile.explosive != 0
                        ? kRocket
                        : (projectile.team == 0 ? kTeamBlue : kTeamRed));
-        if (visual.trail.size() > 1) {
+        // The original only draws the shell sprite for grenades (plus impact
+        // and explosion effects); it has no trajectory line.  Keep the line
+        // for bullets and gadgets, and behind an env flag for shells.
+        static const bool shell_trail_debug =
+            std::getenv("NSYNC_SHELL_TRAIL") != nullptr;
+        const bool arc_shell =
+            projectile.gadget == 0 && projectile.explosive != 0 &&
+            projectile.gravity > core::Fix32::zero();
+        const bool draw_trail =
+            (!arc_shell || shell_trail_debug) && !static_shield &&
+            !gadget_grenade;
+        const bool tip_segment =
+            !visual.trail.empty() &&
+            visual.trail.back() != visual.render_position;
+        const std::size_t committed_segments =
+            visual.trail.size() > 1 ? visual.trail.size() - 1 : 0;
+        const std::size_t trail_segments =
+            committed_segments + (tip_segment ? 1 : 0);
+        if (draw_trail && trail_segments > 0) {
+            const float width = projectile.explosive != 0 ? 3.0f : 2.0f;
+            std::size_t segment_index = 0;
+            const auto draw_segment =
+                [&](const core::Vec2& from, const core::Vec2& to) {
+                    const float alpha =
+                        0.25f +
+                        0.75f *
+                            static_cast<float>(segment_index + 1) /
+                            static_cast<float>(trail_segments);
+                    batch.segment(
+                        from,
+                        to,
+                        width,
+                        with_alpha(trail_color, alpha));
+                    ++segment_index;
+                };
             for (std::size_t i = 1; i < visual.trail.size(); ++i) {
-                const float alpha =
-                    0.25f +
-                    0.75f *
-                        static_cast<float>(i) /
-                        static_cast<float>(visual.trail.size() - 1);
-                batch.segment(
-                    visual.trail[i - 1],
-                    visual.trail[i],
-                    projectile.explosive != 0 ? 3.0f : 2.0f,
-                    with_alpha(trail_color, alpha));
+                draw_segment(visual.trail[i - 1], visual.trail[i]);
+            }
+            if (tip_segment) {
+                draw_segment(visual.trail.back(), visual.render_position);
             }
         }
 
@@ -2742,9 +2988,107 @@ void WorldRenderer::draw(
             core::Fix32::from_ratio(8, 100));
         const float half_world = to_float(projectile_half);
         const bool grenade_shell =
-            projectile.gadget == 0 && projectile.explosive != 0 &&
+            (projectile.gadget == 0 || gadget_grenade) &&
+            projectile.explosive != 0 &&
             projectile.gravity > core::Fix32::zero();
-        if (grenade_shell && projectile_atlas_ready_) {
+        if (static_shield) {
+            if (particle_atlas_ready_) {
+                const float shield_x = to_float(visual.render_position.x);
+                const float shield_y = to_float(visual.render_position.y);
+                const float shield_size = half_world * 2.0f;
+                for (int ring = 0; ring < 3; ++ring) {
+                    const float phase = static_cast<float>(ring) * 2.1f;
+                    const float angle =
+                        presentation_seconds_ * (0.5f + 0.2f * ring) + phase;
+                    const float pulse =
+                        1.0f +
+                        0.035f * std::sin(
+                            presentation_seconds_ * (4.0f + ring) + phase);
+                    draw_atlas_billboard(
+                        particle_add_batch,
+                        particle_atlas_,
+                        "ShieldAlfa",
+                        shield_x,
+                        shield_y,
+                        shield_size * pulse,
+                        angle,
+                        Color{225, 230, 235, 70});
+                }
+                draw_atlas_billboard(
+                    particle_add_batch,
+                    particle_atlas_,
+                    "CFX2_T_GlowSoft",
+                    shield_x,
+                    shield_y,
+                    shield_size * 0.68f,
+                    -presentation_seconds_ * 0.4f,
+                    Color{235, 235, 240, 90});
+
+                static constexpr ParticleLayer kArcLayer{
+                    "Bolt", 1, 0.3f, 0.08f, 0.0f, 0.0f,
+                    0.5f, 0.2f, 6.2831853f, 0.0f, 0.0f, 0.0f,
+                    0.0f, 0.0f, 0.0f, 0.0f, 255, 224, 60, 235,
+                    true, false, false, false};
+                static constexpr ParticleLayer kSparkLayer{
+                    "FlashExplosion", 1, 0.42f, 0.12f, 1.8f, 1.2f,
+                    0.16f, 0.06f, 6.2831853f, 0.0f, 0.8f, 3.2f,
+                    0.0f, 0.0f, 0.0f, 0.0f, 255, 235, 90, 220,
+                    true, false, false, false};
+                visual.shield_accum += frame_delta;
+                constexpr float kArcInterval = 1.0f / 55.0f;
+                while (visual.shield_accum >= kArcInterval) {
+                    visual.shield_accum -= kArcInterval;
+                    const float angle =
+                        next_particle_random() * 6.2831853f;
+                    const float radius =
+                        0.35f + next_particle_random() * 0.45f;
+                    const float arc_x =
+                        shield_x + std::cos(angle) * radius;
+                    const float arc_y =
+                        shield_y + std::sin(angle) * radius * 0.85f;
+                    ParticleVisual arc;
+                    arc.layer = &kArcLayer;
+                    arc.x = arc_x;
+                    arc.y = arc_y;
+                    arc.life = kArcLayer.lifetime +
+                        (next_particle_random() * 2.0f - 1.0f) *
+                            kArcLayer.lifetime_variance;
+                    arc.size_start = kArcLayer.size_start;
+                    arc.size_end = kArcLayer.size_end;
+                    arc.rotation =
+                        next_particle_random() * 6.2831853f;
+                    arc.spin =
+                        (next_particle_random() * 2.0f - 1.0f) * 3.0f;
+                    arc.r = kArcLayer.r;
+                    arc.g = kArcLayer.g;
+                    arc.b = kArcLayer.b;
+                    arc.a = kArcLayer.a;
+                    arc.additive = true;
+                    particles_.push_back(arc);
+                    if (next_particle_random() < 0.05f) {
+                        ParticleVisual spark;
+                        spark.layer = &kSparkLayer;
+                        spark.x = arc_x;
+                        spark.y = arc_y;
+                        const float push =
+                            0.6f + next_particle_random() * 1.2f;
+                        spark.vx = std::cos(angle) * push;
+                        spark.vy = std::sin(angle) * push;
+                        spark.life = kSparkLayer.lifetime;
+                        spark.size_start = kSparkLayer.size_start;
+                        spark.size_end = kSparkLayer.size_end;
+                        spark.rotation =
+                            next_particle_random() * 6.2831853f;
+                        spark.r = kSparkLayer.r;
+                        spark.g = kSparkLayer.g;
+                        spark.b = kSparkLayer.b;
+                        spark.a = kSparkLayer.a;
+                        spark.additive = true;
+                        particles_.push_back(spark);
+                    }
+                }
+            }
+        } else if (grenade_shell && projectile_atlas_ready_) {
             const std::string_view sprite =
                 projectile.team == 0 ? "grenade_bullet_blue"
                                      : "grenade_bullet_orange";
@@ -2752,8 +3096,8 @@ void WorldRenderer::draw(
                 projectile_batch,
                 projectile_atlas_,
                 sprite,
-                to_float(visual.last_position.x),
-                to_float(visual.last_position.y),
+                to_float(visual.render_position.x),
+                to_float(visual.render_position.y),
                 half_world * 2.2f,
                 0.0f,
                 Color{255, 255, 255, 255});
@@ -2770,56 +3114,27 @@ void WorldRenderer::draw(
                     from_float(std::cos(angle) * half_world * 2.2f),
                     from_float(std::sin(angle) * half_world * 2.2f)};
                 batch.segment(
-                    visual.last_position - arm,
-                    visual.last_position + arm,
+                    visual.render_position - arm,
+                    visual.render_position + arm,
                     3.0f,
                     shot_color);
             }
             batch.disc(
-                visual.last_position,
+                visual.render_position,
                 half_world,
                 12,
                 with_alpha(shot_color, 0.8f));
         } else if (gadget_projectile_is_round(projectile.gadget)) {
             batch.disc(
-                visual.last_position,
+                visual.render_position,
                 half_world * 1.5f,
                 14,
                 shot_color);
         } else {
             const core::AABB box = core::AABB::from_center(
-                visual.last_position,
+                visual.render_position,
                 core::Vec2{projectile_half, projectile_half});
             batch.rect(box, shot_color);
-        }
-        if (particle_atlas_ready_ &&
-            projectile.gadget ==
-                static_cast<std::uint8_t>(core::GadgetType::StaticShield) +
-                    1) {
-            const float shield_x = to_float(visual.last_position.x);
-            const float shield_y = to_float(visual.last_position.y);
-            const float pulse =
-                1.0f + 0.06f * std::sin(presentation_seconds_ * 8.0f);
-            const float shield_size =
-                std::max(1.0f, half_world * 2.2f) * pulse;
-            draw_atlas_billboard(
-                particle_add_batch,
-                particle_atlas_,
-                "CFX2_T_GlowSoft",
-                shield_x,
-                shield_y,
-                shield_size * 1.7f,
-                -presentation_seconds_ * 0.9f,
-                Color{120, 200, 255, 120});
-            draw_atlas_billboard(
-                particle_add_batch,
-                particle_atlas_,
-                "ShieldAlfa",
-                shield_x,
-                shield_y,
-                shield_size,
-                presentation_seconds_ * 1.2f,
-                Color{160, 225, 255, 210});
         }
     });
 
@@ -2835,7 +3150,8 @@ void WorldRenderer::draw(
         const ProjectileVisual& visual = it->second;
         if (!visual.trail.empty()) {
             EffectVisual effect;
-            effect.position = visual.last_position;
+            effect.position = visual.render_position;
+            bool draw_effect = true;
             if (visual.explosive != 0) {
                 const Color blast_color =
                     gadget_tag_color(visual.gadget);
@@ -2845,11 +3161,12 @@ void WorldRenderer::draw(
                 effect.r = blast_color.r;
                 effect.g = blast_color.g;
                 effect.b = blast_color.b;
+                draw_effect = visual.gadget == 0;
                 if (local != nullptr) {
                     const float dx =
-                        local_x - to_float(visual.last_position.x);
+                        local_x - to_float(visual.render_position.x);
                     const float dy =
-                        local_y - to_float(visual.last_position.y);
+                        local_y - to_float(visual.render_position.y);
                     const float distance =
                         std::sqrt(dx * dx + dy * dy);
                     const float range = effect.radius + 3.0f;
@@ -2891,8 +3208,10 @@ void WorldRenderer::draw(
                     add_effect(tracer);
                 }
             }
-            add_effect(effect);
-            if (visual.gadget != 0 && particle_atlas_ready_) {
+            if (draw_effect) {
+                add_effect(effect);
+            }
+            if (particle_atlas_ready_) {
                 float direction_angle = 0.0f;
                 if (visual.trail.size() > 1) {
                     const core::Vec2 delta =
@@ -2902,13 +3221,31 @@ void WorldRenderer::draw(
                         to_float(delta.y),
                         to_float(delta.x));
                 }
-                spawn_gadget_particles(
-                    static_cast<core::GadgetType>(visual.gadget - 1),
-                    visual.explosive != 0,
-                    to_float(visual.last_position.x),
-                    to_float(visual.last_position.y),
-                    direction_angle,
-                    core::EntityId{});
+                if (visual.gadget != 0) {
+                    spawn_gadget_particles(
+                        static_cast<core::GadgetType>(visual.gadget - 1),
+                        visual.explosive != 0,
+                        to_float(visual.render_position.x),
+                        to_float(visual.render_position.y),
+                        direction_angle,
+                        core::EntityId{});
+                } else if (visual.explosive != 0) {
+                    // Weapon shells (grenade launcher / rocket) have no
+                    // gadget tag; give them the same original explosion
+                    // particle burst instead of only the geometric ring.
+                    const std::span<const ParticleLayer> layers =
+                        visual.explosion_radius >= 1.5f
+                            ? std::span<const ParticleLayer>{
+                                  particle_detail::kExplosionBig}
+                            : std::span<const ParticleLayer>{
+                                  particle_detail::kExplosionSmall};
+                    spawn_particles(
+                        layers,
+                        to_float(visual.render_position.x),
+                        to_float(visual.render_position.y),
+                        direction_angle,
+                        core::EntityId{});
+                }
             }
         }
         it = projectile_visuals_.erase(it);
@@ -2995,12 +3332,19 @@ void WorldRenderer::draw(
                 visual.interp_to_y = target_y;
                 visual.has_interp = true;
             }
+            // The local hero is drawn at the simulated position.  Rendering
+            // it one tick in the past (the interpolation blend) disagrees
+            // with projectiles, which are drawn at the simulated position:
+            // while jumping or falling fast the grenade trail visibly
+            // started away from the muzzle.  Remote heroes keep the blend.
+            const float player_interp =
+                player.id == local_player ? 1.0f : interpolation;
             visual.render_x =
                 visual.interp_from_x +
-                (visual.interp_to_x - visual.interp_from_x) * interpolation;
+                (visual.interp_to_x - visual.interp_from_x) * player_interp;
             visual.render_y =
                 visual.interp_from_y +
-                (visual.interp_to_y - visual.interp_from_y) * interpolation;
+                (visual.interp_to_y - visual.interp_from_y) * player_interp;
         }
         const bool local = player.id == local_player;
         if (std::FILE* trace = render_trace_file()) {
@@ -3042,6 +3386,15 @@ void WorldRenderer::draw(
             visual.last_weapon == player.weapon &&
             ammo_value < visual.last_ammo &&
             alive;
+        const bool blocked_fire =
+            alive &&
+            visual.last_fire_cooldown >= 0 &&
+            player.fire_cooldown >
+                static_cast<std::uint16_t>(visual.last_fire_cooldown) &&
+            ammo_value == visual.last_ammo &&
+            player.reload_timer == 0 &&
+            player.warmup_timer == 0 &&
+            core::button_down(player.buttons, core::kButtonFire);
         const bool died = visual.last_alive && !alive;
         if (health_lost) {
             visual.hurt_seconds = 0.18f;
@@ -3122,6 +3475,25 @@ void WorldRenderer::draw(
             player.team == 0 ? kTeamBlue : kTeamRed;
         if (alive) {
             draw_team_ring(batch, displayed, team_color);
+        }
+        const bool shocked = alive && player.stun_ticks > 0;
+        if (shocked) {
+            draw_shock_effect(batch, displayed, presentation_seconds_);
+            if (particle_atlas_ready_) {
+                visual.shock_accum += frame_delta * 5.0f;
+                if (visual.shock_accum >= 1.0f) {
+                    visual.shock_accum -= 1.0f;
+                    spawn_particles(
+                        std::span<const ParticleLayer>{
+                            particle_detail::kShockSparks},
+                        to_float(displayed.position.x),
+                        to_float(displayed.position.y) + 0.9f,
+                        0.0f,
+                        player.id);
+                }
+            }
+        } else {
+            visual.shock_accum = 0.0f;
         }
 
         for (std::size_t slot = 0; slot < core::kGadgetSlots; ++slot) {
@@ -3316,6 +3688,7 @@ void WorldRenderer::draw(
         visual.last_health = health_value;
         visual.last_shield = shield_value;
         visual.last_ammo = ammo_value;
+        visual.last_fire_cooldown = static_cast<int>(player.fire_cooldown);
         visual.last_weapon = player.weapon;
         visual.last_alive = alive;
 
@@ -3428,6 +3801,40 @@ void WorldRenderer::draw(
             visual.has_muzzle = true;
         }
 
+        if (blocked_fire) {
+            core::Vec2 direction = player.aim.normalized();
+            if (direction == core::Vec2{}) {
+                direction = core::Vec2{
+                    player.facing < 0 ? -core::Fix32::one()
+                                      : core::Fix32::one(),
+                    core::Fix32::zero()};
+            }
+            EffectVisual effect;
+            effect.kind = EffectKind::Impact;
+            effect.position = visual.muzzle;
+            effect.direction = direction;
+            effect.life_seconds = 0.12f;
+            effect.radius = 0.18f;
+            effect.r = 255;
+            effect.g = 214;
+            effect.b = 130;
+            add_effect(effect);
+            if (particle_atlas_ready_) {
+                const float angle = std::atan2(
+                    to_float(direction.y), to_float(direction.x));
+                spawn_particles(
+                    std::span<const ParticleLayer>{
+                        particle_detail::kMetalImpact},
+                    to_float(visual.muzzle.x),
+                    to_float(visual.muzzle.y),
+                    angle,
+                    player.id);
+            }
+            if (player.id == local_player) {
+                add_shake(0.012f);
+            }
+        }
+
         if (fired) {
             core::Vec2 direction = player.aim.normalized();
             if (direction == core::Vec2{}) {
@@ -3480,9 +3887,29 @@ void WorldRenderer::draw(
                                 tracer_blocked = true;
                             }
                         };
-                    for (const core::AABB& solid :
-                         world.map().solids) {
-                        clamp_tracer(solid);
+                    if (!world.map().borders.empty()) {
+                        for (const core::Segment& border :
+                             world.map().borders) {
+                            core::Fix32 hit_t{};
+                            core::Vec2 normal{};
+                            if (!core::swept_point_hits_segment(
+                                    tracer_path,
+                                    border,
+                                    core::Fix32::zero(),
+                                    hit_t,
+                                    normal)) {
+                                continue;
+                            }
+                            if (hit_t < tracer_hit) {
+                                tracer_hit = hit_t;
+                                tracer_blocked = true;
+                            }
+                        }
+                    } else {
+                        for (const core::AABB& solid :
+                             world.map().solids) {
+                            clamp_tracer(solid);
+                        }
                     }
                     for (std::size_t index = 0;
                          index < world.map().one_way_platforms.size();
@@ -3495,8 +3922,35 @@ void WorldRenderer::draw(
                             fired_weapon.platform_puncher != 0) {
                             continue;
                         }
-                        clamp_tracer(
-                            world.map().one_way_platforms[index]);
+                        if (!world.map().platform_shapes.empty()) {
+                            const std::array<core::Vec2, 4>& shape =
+                                world.map().platform_shapes[index];
+                            for (std::size_t edge = 0;
+                                 edge < shape.size();
+                                 ++edge) {
+                                core::Fix32 hit_t{};
+                                core::Vec2 normal{};
+                                if (!core::swept_point_hits_segment(
+                                        tracer_path,
+                                        core::Segment{
+                                            shape[edge],
+                                            shape[(edge + 1) %
+                                                  shape.size()]},
+                                        core::Fix32::zero(),
+                                        hit_t,
+                                        normal,
+                                        true)) {
+                                    continue;
+                                }
+                                if (hit_t < tracer_hit) {
+                                    tracer_hit = hit_t;
+                                    tracer_blocked = true;
+                                }
+                            }
+                        } else {
+                            clamp_tracer(
+                                world.map().one_way_platforms[index]);
+                        }
                     }
                     world.players().for_each(
                         [&](const core::Player& other) {
@@ -3831,7 +4285,201 @@ void WorldRenderer::draw(
         }
     });
 
-    render_projectiles();
+    render_projectiles(interpolation);
+
+    // Optional ballistic preview for lobbed weapons (F6 / NSYNC_BALLISTIC_PREVIEW).
+    // The original has no such aid; the aim direction is the same straight
+    // line and gravity does the rest, so the preview just integrates the
+    // simulated shell a few dozen ticks ahead with the same bounce rules.
+    if (ballistic_preview_) {
+        if (const core::Player* shooter =
+                world.players().get(local_player)) {
+            if (shooter->alive != 0 &&
+                shooter->weapon < core::content().weapon_count()) {
+                const core::WeaponStats& preview_gun =
+                    core::content().weapon(shooter->weapon);
+                if (preview_gun.gravity > core::Fix32::zero() &&
+                    preview_gun.projectile_speed > core::Fix32::zero()) {
+                    core::Vec2 point = core::aim_muzzle_point(
+                        preview_gun, shooter->position, shooter->aim);
+                    core::Vec2 velocity =
+                        shooter->aim * preview_gun.projectile_speed;
+                    const core::Fix32 radius = core::Fix32::max(
+                        preview_gun.projectile_half_size,
+                        core::Fix32::from_ratio(1, 10));
+                    const core::Fix32 restore =
+                        core::Fix32::from_ratio(1, 2);
+                    std::uint8_t floor_hits = 0;
+                    const std::uint8_t floor_limit =
+                        preview_gun.terrain_bounces == 0
+                        ? 1
+                        : preview_gun.terrain_bounces;
+                    const std::uint32_t tick_limit =
+                        preview_gun.projectile_life == 0
+                        ? 90
+                        : preview_gun.projectile_life;
+                    core::Fix32 traveled{};
+                    std::vector<core::Vec2> path;
+                    path.push_back(point);
+                    bool stopped = false;
+                    for (std::uint32_t tick = 0;
+                         tick < tick_limit && !stopped; ++tick) {
+                        velocity.y += preview_gun.gravity;
+                        const core::Vec2 next = point + velocity;
+                        const core::Segment step{point, next};
+                        core::Fix32 best_t =
+                            core::Fix32::from_int(2);
+                        core::Vec2 best_normal{};
+                        const auto consider_segment =
+                            [&](const core::Segment& segment,
+                                bool one_sided) {
+                                core::Fix32 hit_t{};
+                                core::Vec2 normal{};
+                                if (!core::swept_point_hits_segment(
+                                        step,
+                                        segment,
+                                        radius,
+                                        hit_t,
+                                        normal,
+                                        one_sided)) {
+                                    return;
+                                }
+                                if (hit_t < best_t) {
+                                    best_t = hit_t;
+                                    best_normal = normal;
+                                }
+                            };
+                        const auto consider_box = [&](const core::AABB& box) {
+                            core::Fix32 t_min{};
+                            core::Fix32 t_max{};
+                            if (!core::segment_intersects_aabb(
+                                    step, box, t_min, t_max)) {
+                                return;
+                            }
+                            const core::Fix32 t = core::Fix32::min(
+                                core::Fix32::max(
+                                    t_min, core::Fix32::zero()),
+                                core::Fix32::one());
+                            if (t < best_t) {
+                                best_t = t;
+                                best_normal = core::Vec2{};
+                            }
+                        };
+                        for (const core::Segment& border :
+                             world.map().borders) {
+                            consider_segment(border, false);
+                        }
+                        if (world.map().borders.empty()) {
+                            for (const core::AABB& solid :
+                                 world.map().solids) {
+                                consider_box(solid);
+                            }
+                        }
+                        for (std::size_t index = 0;
+                             index < world.map().one_way_platforms.size();
+                             ++index) {
+                            if (!world.map().platform_shapes.empty()) {
+                                const std::array<core::Vec2, 4>& shape =
+                                    world.map().platform_shapes[index];
+                                for (std::size_t edge = 0;
+                                     edge < shape.size();
+                                     ++edge) {
+                                    consider_segment(
+                                        core::Segment{
+                                            shape[edge],
+                                            shape[(edge + 1) %
+                                                  shape.size()]},
+                                        true);
+                                }
+                            } else {
+                                consider_box(
+                                    world.map().one_way_platforms[index]);
+                            }
+                        }
+                        // Shells detonate on hero contact, so stop the
+                        // preview at an enemy body too.
+                        world.players().for_each(
+                            [&](const core::Player& other) {
+                                if (other.alive == 0 ||
+                                    other.id == shooter->id ||
+                                    other.team == shooter->team) {
+                                    return;
+                                }
+                                consider_box(core::AABB::from_center(
+                                    other.position,
+                                    core::Vec2{
+                                        core::Fix32::from_ratio(35, 100),
+                                        core::Fix32::from_ratio(7, 10)}));
+                            });
+                        if (best_t <= core::Fix32::one()) {
+                            const core::Vec2 contact =
+                                point + (next - point) * best_t;
+                            traveled += (contact - point).length();
+                            path.push_back(contact);
+                            const core::Vec2 normal =
+                                best_normal.normalized();
+                            const core::Fix32 vn = velocity.dot(normal);
+                            if (normal.x != core::Fix32::zero() ||
+                                normal.y != core::Fix32::zero()) {
+                                if (vn < core::Fix32::zero()) {
+                                    const bool from_above =
+                                        normal.y <
+                                        core::Fix32::from_ratio(-7, 10);
+                                    const core::Fix32 threshold =
+                                        preview_gun.normal_velocity >
+                                                core::Fix32::zero()
+                                        ? preview_gun.normal_velocity
+                                        : core::Fix32::from_ratio(1, 120);
+                                    if (from_above &&
+                                        -velocity.y >= threshold) {
+                                        ++floor_hits;
+                                        if (floor_hits >= floor_limit) {
+                                            stopped = true;
+                                        }
+                                    }
+                                    velocity -= normal *
+                                        (vn * (core::Fix32::one() +
+                                              restore));
+                                }
+                            } else {
+                                // No usable normal (solid box fallback):
+                                // stop rather than guess a reflection.
+                                stopped = true;
+                            }
+                            point = contact;
+                        } else {
+                            traveled += (next - point).length();
+                            path.push_back(next);
+                            point = next;
+                        }
+                        if (!stopped && traveled >= preview_gun.range) {
+                            stopped = true;
+                        }
+                    }
+                    const Color preview_color{255, 226, 120, 130};
+                    for (std::size_t index = 1; index < path.size();
+                         ++index) {
+                        batch.segment(
+                            path[index - 1],
+                            path[index],
+                            1.5f,
+                            preview_color);
+                    }
+                    const core::Fix32 dot_half =
+                        core::Fix32::from_ratio(3, 100);
+                    batch.rect(
+                        core::AABB{
+                            core::Vec2{
+                                path.back().x - dot_half,
+                                path.back().y - dot_half},
+                            core::Vec2{
+                                path.back().x + dot_half,
+                                path.back().y + dot_half}},
+                        Color{255, 226, 120, 210});
+                }
+            }
+        }
+    }
 
     for (const EffectVisual& effect : effects_) {
         const float progress = std::clamp(
@@ -4170,6 +4818,46 @@ void WorldRenderer::draw(
         }
     }
 
+    static const bool collision_debug =
+        std::getenv("NSYNC_COLLISION_DEBUG") != nullptr;
+    if (collision_debug) {
+        const auto draw_line = [&](core::Vec2 a, core::Vec2 b, Color color) {
+            const core::Vec2 delta = b - a;
+            const core::Fix32 length = delta.length();
+            if (!(length > core::Fix32::zero())) {
+                return;
+            }
+            const int steps = std::max(
+                1, (length * core::Fix32::from_int(10)).to_int_trunc());
+            const core::Fix32 thickness = core::Fix32::from_ratio(1, 60);
+            for (int step = 0; step <= steps; ++step) {
+                const core::Fix32 t =
+                    core::Fix32::from_int(step) /
+                    core::Fix32::from_int(steps);
+                const core::Vec2 point = a + delta * t;
+                overlay_batch.rect(
+                    core::AABB{
+                        core::Vec2{point.x - thickness,
+                                   point.y - thickness},
+                        core::Vec2{point.x + thickness,
+                                   point.y + thickness}},
+                    color);
+            }
+        };
+        for (const core::Segment& border : world.map().borders) {
+            draw_line(border.a, border.b, Color{40, 255, 90, 230});
+        }
+        for (const std::array<core::Vec2, 4>& shape :
+             world.map().platform_shapes) {
+            for (std::size_t edge = 0; edge < shape.size(); ++edge) {
+                draw_line(
+                    shape[edge],
+                    shape[(edge + 1) % shape.size()],
+                    Color{255, 60, 255, 240});
+            }
+        }
+    }
+
     if (world_vertices.empty() &&
         map_art_vertices.empty() &&
         sprite_vertices.empty() &&
@@ -4255,6 +4943,12 @@ void WorldRenderer::draw(
     if (crystal_ready_) {
         submit(crystal_vertices, crystal_texture_);
     }
+    if (health_supply_ready_) {
+        submit(health_supply_vertices, health_supply_texture_);
+    }
+    if (damage_supply_ready_) {
+        submit(damage_supply_vertices, damage_supply_texture_);
+    }
     if (bag_ready_) {
         submit(bag_vertices, bag_texture_);
     }
@@ -4280,3 +4974,4 @@ void WorldRenderer::draw(
 }
 
 } // namespace nsync::client
+

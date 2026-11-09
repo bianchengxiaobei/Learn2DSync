@@ -11,6 +11,24 @@
       "sprite": "crystal_blue_small"
     }
   ],
+  "supplies": [
+    {
+      "id": "health_box",
+      "kind": "health",
+      "sprite": "health_box",
+      "gain": 0.2,
+      "effect_ticks": 900,
+      "heal_increment": 75,
+      "heal_interval": 30
+    },
+    {
+      "id": "double_damage",
+      "kind": "damage",
+      "sprite": "double_damage",
+      "damage_bonus": 1.0,
+      "effect_ticks": 600
+    }
+  ],
   "mode_rules": {
     "crystal": {
       "deliver_ticks": 60,

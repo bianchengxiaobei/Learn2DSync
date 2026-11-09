@@ -103,7 +103,7 @@
         <div id="hud-notice" class="toast"></div>
         <div id="crosshair">+</div>
         <div id="hud-vitals" class="vitals">
-            <div class="vitals-top"><span id="hud-hero">SCOUT</span><span id="hud-alive">LIVE</span></div>
+            <div class="vitals-top"><span id="hud-hero">SCOUT</span><span id="hud-buff" class="buff"></span><span id="hud-alive">LIVE</span></div>
             <div class="bar health"><div id="hud-health-fill"></div></div>
             <div class="bar shield"><div id="hud-shield-fill"></div></div>
             <div class="vitals-bottom">

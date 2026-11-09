@@ -64,6 +64,7 @@ struct GadgetStats {
     Fix32 impulse{};
     std::uint16_t heal = 0;
     std::uint8_t damage_reduction_percent = 0;
+    std::uint8_t heal_percent = 0;
 };
 
 struct GadgetKinematics {
@@ -270,6 +271,8 @@ inline constexpr GadgetStats kGadgetStats[] = {
         Fix32::zero(),
         Fix32::zero(),
         25,
+        0,
+        8,
     },
     {
         GadgetType::Injection,
@@ -287,6 +290,8 @@ inline constexpr GadgetStats kGadgetStats[] = {
         Fix32::zero(),
         Fix32::zero(),
         250,
+        0,
+        60,
     },
     {
         GadgetType::RocketSalvo,
@@ -688,6 +693,11 @@ inline constexpr std::array<std::array<GadgetType, kGadgetSlots>, 10>
     return type == GadgetType::Kickstart ||
            type == GadgetType::TurboPack ||
            type == GadgetType::HyperAccelerator;
+}
+
+[[nodiscard]] constexpr bool gadget_is_shock_resist(GadgetType type) {
+    return type == GadgetType::Neutralizer ||
+           type == GadgetType::Inhibitor;
 }
 
 [[nodiscard]] constexpr bool gadget_is_projectile(GadgetType type) {

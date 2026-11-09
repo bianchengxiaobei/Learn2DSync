@@ -28,6 +28,7 @@ struct ParsedContent {
     std::vector<HeroStats> heroes;
     std::vector<WeaponStats> weapons;
     std::vector<DropStats> drops;
+    std::vector<SupplyStats> supplies;
     CrystalRules crystal_rules;
 };
 
@@ -72,6 +73,8 @@ public:
                 has_weapons = true;
             } else if (key == "drops") {
                 ok = parse_drops(content.drops);
+            } else if (key == "supplies") {
+                ok = parse_supplies(content.supplies);
             } else if (key == "mode_rules") {
                 ok = parse_mode_rules(content.crystal_rules);
             } else {
@@ -709,6 +712,10 @@ private:
                 std::string_view(name) == "drops") {
                 return fail("too many drops");
             }
+            if (output.size() >= kMaxSupplies &&
+                std::string_view(name) == "supplies") {
+                return fail("too many supplies");
+            }
             T item;
             if (!parse_item(item)) {
                 return false;
@@ -848,6 +855,106 @@ private:
             output,
             [this](DropStats& value) { return parse_drop(value); },
             "drops");
+    }
+
+    bool parse_supply_kind(SupplyKind& kind) {
+        std::string value;
+        if (!parse_string(value)) {
+            return false;
+        }
+        if (value == "health") {
+            kind = SupplyKind::Health;
+        } else if (value == "damage") {
+            kind = SupplyKind::Damage;
+        } else {
+            return fail("unknown supply kind");
+        }
+        return true;
+    }
+
+    bool parse_supply(SupplyStats& supply) {
+        skip_whitespace();
+        if (!consume('{')) {
+            return fail("expected supply object");
+        }
+        bool has_id = false;
+        bool has_kind = false;
+        bool has_sprite = false;
+        for (;;) {
+            std::string key;
+            if (!parse_string(key)) {
+                return false;
+            }
+            skip_whitespace();
+            if (!consume(':')) {
+                return fail("expected ':' after supply key");
+            }
+            skip_whitespace();
+
+            bool ok = true;
+            if (key == "id") {
+                ok = parse_string(supply.id);
+                has_id = true;
+            } else if (key == "kind") {
+                ok = parse_supply_kind(supply.kind);
+                has_kind = true;
+            } else if (key == "sprite") {
+                ok = parse_string(supply.sprite);
+                has_sprite = true;
+            } else if (key == "gain") {
+                ok = parse_fix32(supply.health_gain);
+            } else if (key == "damage_bonus") {
+                ok = parse_fix32(supply.damage_bonus);
+            } else if (key == "effect_ticks") {
+                std::uint32_t value = 0;
+                ok = parse_u32(value);
+                if (ok && value > 65535U) {
+                    ok = fail("supply effect_ticks out of range");
+                }
+                supply.effect_ticks = static_cast<std::uint16_t>(value);
+            } else if (key == "heal_increment") {
+                std::uint32_t value = 0;
+                ok = parse_u32(value);
+                if (ok && value > 65535U) {
+                    ok = fail("supply heal_increment out of range");
+                }
+                supply.heal_increment = static_cast<std::uint16_t>(value);
+            } else if (key == "heal_interval") {
+                std::uint32_t value = 0;
+                ok = parse_u32(value);
+                if (ok && value > 65535U) {
+                    ok = fail("supply heal_interval out of range");
+                }
+                supply.heal_interval = static_cast<std::uint16_t>(value);
+            } else {
+                ok = skip_value(0);
+            }
+            if (!ok) {
+                return false;
+            }
+
+            skip_whitespace();
+            if (consume('}')) {
+                break;
+            }
+            if (!consume(',')) {
+                return fail("expected ',' or '}' in supply object");
+            }
+            skip_whitespace();
+        }
+        if (!has_id || !has_kind || !has_sprite ||
+            supply.id.empty() || supply.id.size() > kMaxContentIdLength ||
+            supply.sprite.size() > kMaxContentIdLength) {
+            return fail("supply object is missing required fields");
+        }
+        return true;
+    }
+
+    bool parse_supplies(std::vector<SupplyStats>& output) {
+        return parse_array(
+            output,
+            [this](SupplyStats& value) { return parse_supply(value); },
+            "supplies");
     }
 
     bool parse_crystal_rules(CrystalRules& rules) {
@@ -1203,6 +1310,34 @@ private:
             content.crystal_rules.hold_score > 100 ||
             content.crystal_rules.hold_score_ticks > 3600) {
             return fail("crystal mode rules are out of range");
+        }
+
+        for (std::size_t index = 0; index < content.supplies.size(); ++index) {
+            SupplyStats& supply = content.supplies[index];
+            if (supply.id.empty() || supply.id.size() > kMaxContentIdLength ||
+                supply.sprite.empty() ||
+                supply.sprite.size() > kMaxContentIdLength ||
+                supply.effect_ticks == 0) {
+                return fail("supply stats are out of range");
+            }
+            if (supply.kind == SupplyKind::Health) {
+                if (supply.health_gain <= Fix32::zero() ||
+                    supply.health_gain > Fix32::one() ||
+                    supply.heal_increment == 0 ||
+                    supply.heal_interval == 0) {
+                    return fail("health supply stats are out of range");
+                }
+            } else if (supply.kind == SupplyKind::Damage) {
+                if (supply.damage_bonus <= Fix32::zero() ||
+                    supply.damage_bonus > Fix32::from_int(10)) {
+                    return fail("damage supply stats are out of range");
+                }
+            }
+            for (std::size_t other = 0; other < index; ++other) {
+                if (content.supplies[other].id == supply.id) {
+                    return fail("duplicate supply id");
+                }
+            }
         }
 
         for (HeroStats& hero : content.heroes) {
@@ -1617,6 +1752,28 @@ void ContentDatabase::reset_defaults() {
         3,
         "crystal_blue_small",
     };
+    // Original supplies: artifact 102 (Big med box) and 105 (Double damage).
+    supply_count_ = 2;
+    supplies_[0] = SupplyStats{
+        SupplyKind::Health,
+        "health_box",
+        "health_box",
+        Fix32::from_ratio(2, 10),
+        Fix32::zero(),
+        900,
+        75,
+        30,
+    };
+    supplies_[1] = SupplyStats{
+        SupplyKind::Damage,
+        "double_damage",
+        "double_damage",
+        Fix32::zero(),
+        Fix32::one(),
+        600,
+        0,
+        0,
+    };
     crystal_rules_ = CrystalRules{};
     crystal_rules_.deliver_ticks = 60;
     crystal_rules_.score_per_delivery = 1;
@@ -1637,6 +1794,7 @@ bool ContentDatabase::load_json(std::string_view text, std::string* error) {
     result.hero_count_ = parsed.heroes.size();
     result.weapon_count_ = parsed.weapons.size();
     result.drop_count_ = parsed.drops.size();
+    result.supply_count_ = parsed.supplies.size();
     result.crystal_rules_ = parsed.crystal_rules;
     for (std::size_t index = 0; index < result.hero_count_; ++index) {
         result.heroes_[index] = std::move(parsed.heroes[index]);
@@ -1646,6 +1804,9 @@ bool ContentDatabase::load_json(std::string_view text, std::string* error) {
     }
     for (std::size_t index = 0; index < result.drop_count_; ++index) {
         result.drops_[index] = std::move(parsed.drops[index]);
+    }
+    for (std::size_t index = 0; index < result.supply_count_; ++index) {
+        result.supplies_[index] = std::move(parsed.supplies[index]);
     }
     *this = std::move(result);
     return true;
@@ -1692,6 +1853,10 @@ const DropStats& ContentDatabase::drop(std::size_t index) const {
     return drops_[index < drop_count_ ? index : 0];
 }
 
+const SupplyStats& ContentDatabase::supply(std::size_t index) const {
+    return supplies_[index < supply_count_ ? index : 0];
+}
+
 const HeroStats* ContentDatabase::find_hero(std::string_view id) const {
     for (std::size_t index = 0; index < hero_count_; ++index) {
         if (heroes_[index].id == id) {
@@ -1722,6 +1887,24 @@ const DropStats* ContentDatabase::find_drop(std::string_view id) const {
 std::uint8_t ContentDatabase::find_drop_type(std::string_view id) const {
     for (std::size_t index = 0; index < drop_count_; ++index) {
         if (drops_[index].id == id) {
+            return static_cast<std::uint8_t>(index);
+        }
+    }
+    return 0;
+}
+
+const SupplyStats* ContentDatabase::find_supply(std::string_view id) const {
+    for (std::size_t index = 0; index < supply_count_; ++index) {
+        if (supplies_[index].id == id) {
+            return &supplies_[index];
+        }
+    }
+    return nullptr;
+}
+
+std::uint8_t ContentDatabase::find_supply_type(std::string_view id) const {
+    for (std::size_t index = 0; index < supply_count_; ++index) {
+        if (supplies_[index].id == id) {
             return static_cast<std::uint8_t>(index);
         }
     }
@@ -1817,6 +2000,18 @@ std::uint64_t ContentDatabase::fingerprint() const {
         writer.u16(drop.vacant_ticks);
         writer.u8(drop.max_capacity);
         append_string(writer, drop.sprite);
+    }
+    writer.u32(static_cast<std::uint32_t>(supply_count_));
+    for (std::size_t index = 0; index < supply_count_; ++index) {
+        const SupplyStats& supply = supplies_[index];
+        writer.u8(static_cast<std::uint8_t>(supply.kind));
+        append_string(writer, supply.id);
+        append_string(writer, supply.sprite);
+        writer.u32(static_cast<std::uint32_t>(supply.health_gain.raw()));
+        writer.u32(static_cast<std::uint32_t>(supply.damage_bonus.raw()));
+        writer.u16(supply.effect_ticks);
+        writer.u16(supply.heal_increment);
+        writer.u16(supply.heal_interval);
     }
     writer.u16(crystal_rules_.deliver_ticks);
     writer.u16(crystal_rules_.score_per_delivery);

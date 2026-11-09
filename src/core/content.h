@@ -15,6 +15,7 @@ namespace nsync::core {
 inline constexpr std::size_t kMaxHeroes = 16;
 inline constexpr std::size_t kMaxWeapons = 32;
 inline constexpr std::size_t kMaxDrops = 16;
+inline constexpr std::size_t kMaxSupplies = 16;
 inline constexpr std::uint32_t kContentVersion = 2;
 
 enum class HeroType : std::uint8_t {
@@ -98,6 +99,29 @@ struct CrystalRules {
     std::uint8_t carry_limit = 3;
 };
 
+// Original supply artifacts (GESupplyGenerator.Supply).  Health boxes restore
+// a fraction of maximum health and start the health_pump buff; buff boxes add
+// a damage feature for a fixed duration (id 105 is the +100% box).
+enum class SupplyKind : std::uint8_t {
+    Health = 0,
+    Damage = 1,
+};
+
+struct SupplyStats {
+    SupplyKind kind = SupplyKind::Health;
+    std::string id;
+    std::string sprite;
+    // Fraction of hpBase restored on pickup (original "gain").
+    Fix32 health_gain{};
+    // Additive weapon damage multiplier (1 = +100% damage).
+    Fix32 damage_bonus{};
+    // health_pump: heal_increment every heal_interval ticks for effect_ticks.
+    // Damage boxes use effect_ticks as the buff lifespan.
+    std::uint16_t effect_ticks = 0;
+    std::uint16_t heal_increment = 0;
+    std::uint16_t heal_interval = 0;
+};
+
 struct WeaponStats {
     WeaponType type = WeaponType::Rifle;
     std::string id;
@@ -160,13 +184,17 @@ public:
     [[nodiscard]] std::size_t hero_count() const { return hero_count_; }
     [[nodiscard]] std::size_t weapon_count() const { return weapon_count_; }
     [[nodiscard]] std::size_t drop_count() const { return drop_count_; }
+    [[nodiscard]] std::size_t supply_count() const { return supply_count_; }
     [[nodiscard]] const HeroStats& hero(std::size_t index) const;
     [[nodiscard]] const WeaponStats& weapon(std::size_t index) const;
     [[nodiscard]] const DropStats& drop(std::size_t index) const;
+    [[nodiscard]] const SupplyStats& supply(std::size_t index) const;
     [[nodiscard]] const HeroStats* find_hero(std::string_view id) const;
     [[nodiscard]] const WeaponStats* find_weapon(std::string_view id) const;
     [[nodiscard]] const DropStats* find_drop(std::string_view id) const;
+    [[nodiscard]] const SupplyStats* find_supply(std::string_view id) const;
     [[nodiscard]] std::uint8_t find_drop_type(std::string_view id) const;
+    [[nodiscard]] std::uint8_t find_supply_type(std::string_view id) const;
     [[nodiscard]] const CrystalRules& crystal_rules() const {
         return crystal_rules_;
     }
@@ -176,10 +204,12 @@ private:
     std::array<HeroStats, kMaxHeroes> heroes_{};
     std::array<WeaponStats, kMaxWeapons> weapons_{};
     std::array<DropStats, kMaxDrops> drops_{};
+    std::array<SupplyStats, kMaxSupplies> supplies_{};
     CrystalRules crystal_rules_{};
     std::size_t hero_count_ = 0;
     std::size_t weapon_count_ = 0;
     std::size_t drop_count_ = 0;
+    std::size_t supply_count_ = 0;
 };
 
 [[nodiscard]] ContentDatabase& content();

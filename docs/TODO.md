@@ -1195,6 +1195,8 @@ E:\NSYNC_RE\reference\nsync\
 
 ## 13. 版本记录
 
+- v1.78（2026-11-08）：原版地图补给道具（`GESupplyGenerator`）。新增 `supply_gen` 导入与 `map.supply_spawners`（地图二进制 v8），从原版 World1/2/3/5/6/7/8/9/10/WorldFlagCapture 提取 5–8 个补给点；内容新增 `supplies`：`health_box`（原版 102，拾取回复 20% 最大生命并挂 `health_pump`：每 30 tick +75、持续 900 tick、受伤/满血移除）与 `double_damage`（原版 105，伤害 +100%、持续 600 tick）；生成器保持原版“同一时间只刷一个，拿走后按 min 间隔重刷”的确定性逻辑，机器人会在低血量/附近有道具时主动拾取。快照 v19、协议 v15；客户端绘制原版医疗箱/双倍伤害骷髅贴图并在 HUD 显示 `X2`/`+HP` 状态；新增 `test_supplies` 覆盖拾取、回血、双倍伤害与快照回读，golden replay 哈希已重生成。
+
 - v1.75（2026-11-05）：原版水晶地图与携带显示。`World2`/`World7` 转换为 `crystal_01`/`crystal_02`（13 个水晶点、2 个中立 depot、原版 border/platform/jump pad/出生点），`crystal_01` 同时烘焙原版地图美术；`drop_depot` 支持 `team=0` 中立交付点，双方都可交付；携带水晶时按数量显示原版 `hero_crystal_drop_01/02/03` 背包 sprite，并在头顶绘制数量，血条自动上移避让；默认客户端/服务器配置改为 `crystal_01 + crystal`。同时导入原版 `World3/5/6/8/9/10/WorldFlagCapture`（`world3/5/6/8/9/10/world_flag_capture`，Control 地图带 objective），全部带原版美术；地图形状上限提升到 2048 以容纳 WorldFlagCapture。新增地图二进制回读、原版水晶地图 pick-up/deliver 单元测试、`nsync_crystal_loopback` 和 `nsync_control_world5_loopback`。
 - v1.76（2026-11-05）：服务器选图与客户端自动跟随。协议 v13 在 `LoginRequest`/`LoginResponse`/`LobbyState`/`MatchStart` 中传递 `map_id`；服务器新增 `server.map_rotation` / `--map-rotation`，每局开始时轮换地图，并在登录、房间和开局消息中下发当前地图。客户端登录被 map fingerprint 拒绝时按服务器 `map_id` 从本地 `assets/maps/<id>.json|.bin` 自动加载后重试；MatchStart 换图时重新初始化本地世界并重载地图美术。默认服务器配置轮换 `crystal_01`/`crystal_02`；单图可用 `--map` 关闭轮换。新增 `test_server_map_autofollow` 覆盖客户端从 `crystal_01` 自动切换到服务器 `world5`。
 - v1.77（2026-11-05）：修正原版地图美术串场景。`import_original_map.py` 现在按目标 scene 的 CAB 过滤，并跳过 inactive hierarchy，避免 World6/8/9/10 把 World2/World3/TutorialWorld/WorldFlagCapture 的桥梁、水晶、旗帜底座和机关烘焙进来；重新生成全部地图美术（含 `crystal_02`），减少多余“悬空图片”。

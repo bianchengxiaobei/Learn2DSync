@@ -6,7 +6,7 @@
   "required": ["version", "heroes", "weapons"],
   "additionalProperties": true,
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 2 },
     "heroes": {
       "type": "array",
       "minItems": 1,
@@ -32,6 +32,25 @@
           "ability_power": { "type": "number", "exclusiveMinimum": 0, "maximum": 4096 },
           "surface_area": { "type": "number", "exclusiveMinimum": 0, "maximum": 16 },
           "weapon": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    },
+    "supplies": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "sprite", "effect_ticks"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "kind": { "enum": ["health", "damage"] },
+          "sprite": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "gain": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+          "damage_bonus": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+          "effect_ticks": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "heal_increment": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "heal_interval": { "type": "integer", "minimum": 0, "maximum": 65535 }
         }
       }
     },

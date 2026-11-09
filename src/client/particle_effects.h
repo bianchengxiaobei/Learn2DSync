@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "core/gadgets.h"
 
@@ -62,21 +62,42 @@ inline constexpr ParticleLayer kSlashSparks[] = {
 };
 
 inline constexpr ParticleLayer kExplosionBig[] = {
-    {"flash", 1, 0.18f, 0.03f, 0.0f, 0.0f, 1.4f, 0.7f, kFull, 0.0f,
-    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 238, 205, 255, true, false,
-    false, false},
-    {"smokyShockwave", 1, 0.34f, 0.05f, 0.0f, 0.0f, 0.55f, 3.0f, kFull,
-    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 220, 180, 220, true,
-    false, true, false},
-    {"smallSharpPoint", 14, 0.38f, 0.16f, 6.5f, 3.5f, 0.12f, 0.04f, kFull,
-    0.0f, 1.8f, 5.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 200, 130, 255, true,
-    true, false, false},
-    {"dirtySmoke", 7, 0.95f, 0.3f, 1.5f, 0.8f, 0.65f, 1.8f, kFull, 0.0f,
-    1.0f, -1.0f, 0.6f, 0.0f, 0.0f, 0.02f, 60, 55, 52, 190, false, false,
-    false, false},
-    {"singleStone", 6, 0.75f, 0.2f, 5.5f, 2.5f, 0.13f, 0.08f, kFull, 0.0f,
-    0.8f, 9.0f, 5.0f, 0.0f, 0.0f, 0.0f, 120, 115, 105, 255, false, false,
-    false, false},
+    {"flash", 1, 0.45f, 0.0f, 0.0f, 0.0f, 5.4f, 4.8f, kFull, 0.0f, 0.0f,
+     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 255, 255, 70, true, false, false,
+     false},
+    {"smokyShockwave", 1, 0.28f, 0.02f, 0.0f, 0.0f, 0.6f, 5.6f, kFull, 0.0f,
+     0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 170, 160, 135, 70, true, false,
+     true, false},
+    {"MuzzlefireSnipe", 60, 0.28f, 0.05f, 1.5f, 0.6f, 0.2f, 0.45f, kFull,
+     0.0f, 1.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 240, 220, 140, true,
+     true, false, false},
+    {"dirtySmoke2", 26, 0.6f, 0.15f, 4.0f, 1.5f, 0.6f, 2.0f, kFull, 0.0f,
+     2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 190, 160, 135, 60, true, false,
+     false, false},
+    {"detailSmoke", 12, 1.1f, 0.25f, 2.0f, 0.8f, 0.8f, 2.2f, kFull, 0.0f,
+     1.2f, 0.0f, 0.0f, 0.0f, 0.0f, 0.18f, 85, 72, 60, 50, true, false,
+     false, false},
+    {"smokeImpact", 16, 0.75f, 0.2f, 1.7f, 0.6f, 0.25f, 0.8f, kFull, 0.0f,
+     1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.05f, 75, 75, 75, 170, false, false,
+     false, false},
+    {"singleStone", 24, 1.0f, 0.25f, 8.0f, 3.0f, 0.08f, 0.1f, kFull, 0.0f,
+     0.4f, 9.8f, 6.0f, 0.0f, 0.0f, 0.0f, 84, 69, 41, 255, false, false,
+     false, false},
+    {"rocketTail", 24, 0.2f, 0.04f, 20.0f, 6.0f, 0.05f, 0.02f, kFull, 0.0f,
+     6.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 245, 220, 160, true, true,
+     false, false},
+    {"smallSharpPoint", 40, 1.2f, 0.3f, 6.0f, 2.0f, 0.1f, 0.0f, kFull, 0.0f,
+     0.6f, 5.0f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 243, 73, 190, true, true,
+     false, false},
+    {"smallSharpPoint", 12, 1.2f, 0.3f, 0.6f, 0.4f, 0.05f, 0.02f, kFull,
+     0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 255, 200, 169, 100, true,
+     false, false, false},
+    {"MortarExplosionDebris", 12, 0.5f, 0.12f, 5.0f, 2.0f, 0.2f, 0.25f,
+     kFull, 0.0f, 0.3f, 9.8f, 8.0f, 0.0f, 0.0f, 0.0f, 88, 84, 78, 255,
+     false, false, false, false},
+    {"SmokePlume", 6, 0.4f, 0.1f, 0.4f, 0.3f, 0.45f, 0.9f, kFull, 0.0f,
+     0.8f, -1.0f, 1.5f, 0.0f, 0.0f, 0.0f, 120, 120, 120, 130, false, false,
+     false, false},
 };
 
 inline constexpr ParticleLayer kExplosionSmall[] = {
@@ -110,6 +131,15 @@ inline constexpr ParticleLayer kFlashExplosion[] = {
     {"FlashExplosion", 7, 0.32f, 0.1f, 3.2f, 1.8f, 0.18f, 0.06f, kFull,
     0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 235, 250, 255, 240, true,
     true, false, false},
+};
+
+inline constexpr ParticleLayer kShockSparks[] = {
+    {"Bolt", 3, 0.26f, 0.1f, 3.6f, 1.8f, 0.3f, 0.1f, kFull, 0.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 180, 235, 255, 255, true, true, false,
+    false},
+    {"CFX_T_Anim7_Electricity", 2, 0.3f, 0.12f, 2.0f, 1.2f, 0.3f, 0.12f,
+    kFull, 0.0f, 1.0f, 0.0f, 6.0f, 0.0f, 0.0f, 0.0f, 205, 242, 255, 255,
+    true, false, false, false},
 };
 
 inline constexpr ParticleLayer kFireExplosion[] = {
@@ -443,7 +473,7 @@ inline constexpr GadgetParticles kGadgetParticles[] = {
     {std::span<const ParticleLayer>{particle_detail::kEmpty}, std::span<const ParticleLayer>{particle_detail::kExplosionBig},
      std::span<const ParticleLayer>{particle_detail::kMetalImpact}, std::span<const ParticleLayer>{particle_detail::kEmpty}, 0.0f},
     // StaticShield
-    {std::span<const ParticleLayer>{particle_detail::kFlashExplosion}, std::span<const ParticleLayer>{particle_detail::kFlashExplosion},
+    {std::span<const ParticleLayer>{particle_detail::kEmpty}, std::span<const ParticleLayer>{particle_detail::kFlashExplosion},
      std::span<const ParticleLayer>{particle_detail::kEmpty}, std::span<const ParticleLayer>{particle_detail::kShieldAura}, 30.0f},
     // Kickstart
     {std::span<const ParticleLayer>{particle_detail::kEmpty}, std::span<const ParticleLayer>{particle_detail::kEmpty},
@@ -537,3 +567,5 @@ static_assert(std::size(kGadgetParticles) == kGadgetParticleCount);
 }
 
 } // namespace nsync::client
+
+

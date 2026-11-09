@@ -51,9 +51,25 @@ struct Segment {
 
     constexpr Segment() = default;
     constexpr Segment(Vec2 a_, Vec2 b_) : a(a_), b(b_) {}
+
+    friend constexpr bool operator==(const Segment& left, const Segment& right) {
+        return left.a == right.a && left.b == right.b;
+    }
+
+    friend constexpr bool operator!=(const Segment& left, const Segment& right) {
+        return !(left == right);
+    }
 };
 
 bool segment_intersects_aabb(const Segment& segment, const AABB& box);
 bool segment_intersects_aabb(const Segment& segment, const AABB& box, Fix32& t_min, Fix32& t_max);
+
+bool swept_point_hits_segment(
+    const Segment& path,
+    const Segment& segment,
+    Fix32 radius,
+    Fix32& hit_t,
+    Vec2& normal,
+    bool one_sided = false);
 
 } // namespace nsync::core

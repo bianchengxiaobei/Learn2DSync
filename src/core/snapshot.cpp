@@ -57,6 +57,12 @@ void write_player(ByteWriter& writer, const Player& player) {
     writer.u16(player.invulnerable_ticks);
     writer.u16(player.heal_ticks);
     writer.u16(player.heal_interval);
+    writer.u16(player.supply_heal_ticks);
+    writer.u16(player.supply_heal_interval);
+    writer.u16(player.supply_heal_period);
+    writer.u16(player.supply_heal_amount);
+    writer.u16(player.damage_bonus_ticks);
+    writer.u32(static_cast<std::uint32_t>(player.damage_bonus.raw()));
     writer.u16(player.slow_ticks);
     writer.u16(player.stun_ticks);
     writer.u8(player.gadget_latch);
@@ -93,6 +99,7 @@ void write_player(ByteWriter& writer, const Player& player) {
 
 bool read_player(ByteReader& reader, Player& player, std::string* error) {
     std::uint32_t health = 0;
+    std::uint32_t damage_bonus = 0;
     if (!read_entity(reader, player.id) ||
         !read_vec2(reader, player.position) ||
         !read_vec2(reader, player.velocity) ||
@@ -108,6 +115,12 @@ bool read_player(ByteReader& reader, Player& player, std::string* error) {
         !reader.u16(player.invulnerable_ticks) ||
         !reader.u16(player.heal_ticks) ||
         !reader.u16(player.heal_interval) ||
+        !reader.u16(player.supply_heal_ticks) ||
+        !reader.u16(player.supply_heal_interval) ||
+        !reader.u16(player.supply_heal_period) ||
+        !reader.u16(player.supply_heal_amount) ||
+        !reader.u16(player.damage_bonus_ticks) ||
+        !reader.u32(damage_bonus) ||
         !reader.u16(player.slow_ticks) ||
         !reader.u16(player.stun_ticks) ||
         !reader.u8(player.gadget_latch) ||
@@ -146,6 +159,8 @@ bool read_player(ByteReader& reader, Player& player, std::string* error) {
         return false;
     }
     player.health = Fix32::from_raw(static_cast<std::int32_t>(health));
+    player.damage_bonus =
+        Fix32::from_raw(static_cast<std::int32_t>(damage_bonus));
     if (!player.id.valid() || player.team > 1 || player.weapon >= content().weapon_count() ||
         player.hero >= content().hero_count() || player.bot > 1 || player.alive > 1 ||
         player.grounded > 1 || player.drop_through_ticks > 3 ||
@@ -153,6 +168,11 @@ bool read_player(ByteReader& reader, Player& player, std::string* error) {
         player.fire_latch > 1 || player.pad_boost_ticks > 10 ||
         player.dispersion_ticks > 6000 || player.warmup_timer > 6000 ||
         player.ammo > 512 ||
+        player.supply_heal_interval > 3600 ||
+        player.supply_heal_period > 3600 ||
+        player.supply_heal_amount > 4096 ||
+        player.damage_bonus < Fix32::zero() ||
+        player.damage_bonus > Fix32::from_int(10) ||
         player.depot_hold_ticks > 3600 ||
         player.hold_score_timer > 3600 ||
         player.carried_drops > 8 ||
@@ -408,6 +428,32 @@ bool read_drop(ByteReader& reader, Drop& drop, std::string* error) {
     return true;
 }
 
+void write_supply(ByteWriter& writer, const SupplyInstance& supply) {
+    writer.u8(supply.spawner);
+    writer.u8(supply.type);
+    write_vec2(writer, supply.position);
+}
+
+bool read_supply(
+    ByteReader& reader,
+    SupplyInstance& supply,
+    std::string* error) {
+    if (!reader.u8(supply.spawner) || !reader.u8(supply.type) ||
+        !read_vec2(reader, supply.position)) {
+        if (error) {
+            *error = "truncated supply snapshot";
+        }
+        return false;
+    }
+    if (supply.type >= content().supply_count()) {
+        if (error) {
+            *error = "invalid supply snapshot fields";
+        }
+        return false;
+    }
+    return true;
+}
+
 bool validate_allocator_state(
     const EntityAllocatorState& state,
     std::string* error) {
@@ -460,6 +506,25 @@ std::vector<std::uint8_t> encode_snapshot_payload(const WorldSnapshot& snapshot)
     writer.u16(snapshot.objective_progress);
     writer.u16(snapshot.objective_score_ticks);
 
+    writer.u32(static_cast<std::uint32_t>(snapshot.control_points.size()));
+    for (const ControlPointSnapshot& point : snapshot.control_points) {
+        writer.u8(point.def);
+        writer.u16(point.entry);
+        writer.i16(point.ticks);
+        writer.u16(point.hold_ticks);
+    }
+    writer.u32(static_cast<std::uint32_t>(
+        snapshot.control_point_vacant_entries.size()));
+    for (const std::uint16_t entry : snapshot.control_point_vacant_entries) {
+        writer.u16(entry);
+    }
+    writer.u32(static_cast<std::uint32_t>(
+        snapshot.control_point_respawn_frames.size()));
+    for (const std::uint32_t frame : snapshot.control_point_respawn_frames) {
+        writer.u32(frame);
+    }
+    writer.u8(snapshot.control_points_recycled);
+
     writer.u32(snapshot.entities.next_index);
     writer.u32(static_cast<std::uint32_t>(snapshot.entities.generations.size()));
     for (const std::uint16_t generation : snapshot.entities.generations) {
@@ -483,6 +548,15 @@ std::vector<std::uint8_t> encode_snapshot_payload(const WorldSnapshot& snapshot)
     writer.u32(static_cast<std::uint32_t>(drops.size()));
     for (const Drop& drop : drops) {
         write_drop(writer, drop);
+    }
+
+    writer.u32(static_cast<std::uint32_t>(snapshot.supply_spawners.size()));
+    for (const SupplySpawnerState& spawner : snapshot.supply_spawners) {
+        writer.u32(spawner.timer);
+    }
+    writer.u32(static_cast<std::uint32_t>(snapshot.supplies.size()));
+    for (const SupplyInstance& supply : snapshot.supplies) {
+        write_supply(writer, supply);
     }
 
     return writer.data();
@@ -548,10 +622,72 @@ bool decode_snapshot(
         result.game_mode > 2 ||
         result.objective_owner > 2 ||
         result.objective_capturing_team > 2 ||
-        result.objective_progress > kObjectiveCaptureTicks ||
-        result.objective_score_ticks > kObjectiveScoreTicks) {
+        result.objective_progress > kSnapshotMaxObjectiveTicks ||
+        result.objective_score_ticks > kSnapshotMaxObjectiveTicks) {
         if (error) {
             *error = "invalid snapshot match state";
+        }
+        return false;
+    }
+
+    std::uint32_t control_point_count = 0;
+    if (!reader.u32(control_point_count) ||
+        control_point_count > kSnapshotMaxControlPoints) {
+        if (error) {
+            *error = "invalid control point count";
+        }
+        return false;
+    }
+    result.control_points.resize(control_point_count);
+    for (ControlPointSnapshot& point : result.control_points) {
+        if (!reader.u8(point.def) ||
+            !reader.u16(point.entry) ||
+            !reader.i16(point.ticks) ||
+            !reader.u16(point.hold_ticks)) {
+            if (error) {
+                *error = "truncated control point";
+            }
+            return false;
+        }
+    }
+    std::uint32_t vacant_count = 0;
+    if (!reader.u32(vacant_count) ||
+        vacant_count > kSnapshotMaxControlPointEntries) {
+        if (error) {
+            *error = "invalid control point entry count";
+        }
+        return false;
+    }
+    result.control_point_vacant_entries.resize(vacant_count);
+    for (std::uint16_t& entry : result.control_point_vacant_entries) {
+        if (!reader.u16(entry)) {
+            if (error) {
+                *error = "truncated control point entries";
+            }
+            return false;
+        }
+    }
+    std::uint32_t frame_count = 0;
+    if (!reader.u32(frame_count) ||
+        frame_count > kSnapshotMaxControlPointFrames) {
+        if (error) {
+            *error = "invalid control point respawn frame count";
+        }
+        return false;
+    }
+    result.control_point_respawn_frames.resize(frame_count);
+    for (std::uint32_t& frame : result.control_point_respawn_frames) {
+        if (!reader.u32(frame)) {
+            if (error) {
+                *error = "truncated control point respawn frames";
+            }
+            return false;
+        }
+    }
+    if (!reader.u8(result.control_points_recycled) ||
+        result.control_points_recycled > 1) {
+        if (error) {
+            *error = "invalid control point recycle flag";
         }
         return false;
     }
@@ -638,6 +774,38 @@ bool decode_snapshot(
     result.drops.resize(drop_count);
     for (std::uint32_t index = 0; index < drop_count; ++index) {
         if (!read_drop(reader, result.drops[index], error)) {
+            return false;
+        }
+    }
+
+    std::uint32_t spawner_count = 0;
+    if (!reader.u32(spawner_count) ||
+        spawner_count > kSnapshotMaxSupplySpawners) {
+        if (error) {
+            *error = "invalid supply spawner count";
+        }
+        return false;
+    }
+    result.supply_spawners.resize(spawner_count);
+    for (SupplySpawnerState& spawner : result.supply_spawners) {
+        if (!reader.u32(spawner.timer)) {
+            if (error) {
+                *error = "truncated supply spawner snapshot";
+            }
+            return false;
+        }
+    }
+
+    std::uint32_t supply_count = 0;
+    if (!reader.u32(supply_count) || supply_count > kSnapshotMaxSupplies) {
+        if (error) {
+            *error = "invalid supply count";
+        }
+        return false;
+    }
+    result.supplies.resize(supply_count);
+    for (std::uint32_t index = 0; index < supply_count; ++index) {
+        if (!read_supply(reader, result.supplies[index], error)) {
             return false;
         }
     }

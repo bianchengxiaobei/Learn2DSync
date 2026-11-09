@@ -85,13 +85,34 @@ def build_map(world: dict, map_id: str) -> dict:
     platforms = [item for item in world["items"] if item.get("def") == "platform"]
 
     solids = border_boxes(borders)
+    border_lines: list[list[float]] = []
+    for border in borders:
+        ax, ay = transform(border["v1"][0], border["v1"][1])
+        bx, by = transform(border["v2"][0], border["v2"][1])
+        if math.hypot(bx - ax, by - ay) < 1e-5:
+            continue
+        border_lines.append([
+            round(ax, 4),
+            round(ay, 4),
+            round(bx, 4),
+            round(by, 4),
+        ])
     platform_rects: list[list[float]] = []
+    platform_shapes: list[list[list[float]]] = []
     platform_hatchway: list[bool] = []
     jump_pads: list[dict] = []
     for platform in platforms:
         rect, hatchway, jump_velocity = platform_rect(platform)
         platform_rects.append(rect)
         platform_hatchway.append(hatchway)
+        points = [
+            list(transform(x, y))
+            for x, y in platform["shape"]["vertices"]
+        ]
+        if len(points) != 4:
+            raise SystemExit(
+                f"{map_id}: expected 4 platform vertices, got {len(points)}")
+        platform_shapes.append(points)
         if jump_velocity > 0.0:
             jump_pads.append({
                 "rect": rect,
@@ -105,21 +126,61 @@ def build_map(world: dict, map_id: str) -> dict:
     if len(spawns) != 10:
         raise SystemExit(f"{map_id}: expected 10 player entries, got {len(spawns)}")
 
-    objective = None
+    control_points = None
     drop_spawns: list[dict] = []
     drop_depots: list[dict] = []
+    supply_spawners: list[dict] = []
+    supply_ids = {102: "health_box", 105: "double_damage"}
     for plugin in world["plugins"]:
-        if plugin.get("def") == "cp_gen":
-            point = plugin["points"][0]
-            entry = plugin["entries"][0]
-            center_x, center_y = transform(entry[0], entry[1])
-            width, height = point["dimensions"]
-            objective = [
-                round(center_x - width * 0.5, 4),
-                round(center_y - height * 0.5, 4),
-                round(width, 4),
-                round(height, 4),
+        if plugin.get("def") == "supply_gen":
+            supplies = [
+                supply_ids[item]
+                for item in plugin.get("supplies", [])
+                if item in supply_ids
             ]
+            entries = [
+                list(transform(entry[0], entry[1]))
+                for entry in plugin.get("entries", [])
+            ]
+            if supplies and entries:
+                supply_spawners.append({
+                    "supplies": supplies,
+                    "entries": entries,
+                    "start_tick": max(
+                        1, int(round(plugin.get("initialDelaySecs", 0) * 60))),
+                    "min_interval": int(round(
+                        plugin.get("minIntervalSecs", 0) * 60)),
+                    "max_interval": int(round(
+                        plugin.get("maxIntervalSecs", 0) * 60)),
+                })
+        elif plugin.get("def") == "cp_gen":
+            frames_per_tick = int(plugin["framesPerTick"])
+            point = plugin["points"][0]
+            width, height = point["dimensions"]
+            entries = [
+                list(transform(entry[0], entry[1]))
+                for entry in plugin["entries"]
+            ]
+            control_points = {
+                # Original frames run at 30 Hz; the runtime is 60 Hz.
+                "update_interval": max(1, frames_per_tick * 2),
+                "start_tick": int(round(plugin["initialDelaySecs"] * 60)),
+                "min_interval": int(round(plugin["minIntervalSecs"] * 60)),
+                "max_interval": int(round(plugin["maxIntervalSecs"] * 60)),
+                "instance_limit": int(plugin["instanceLimit"]),
+                "capture_group_size": int(plugin["captureGroupSize"]),
+                "points": [{
+                    "dimensions": [round(width, 4), round(height, 4)],
+                    # Capture is counted in generator updates.
+                    "capture_ticks": max(
+                        1, int(round(point["captureSecs"] * 30 / frames_per_tick))),
+                    # Hold scoring is counted in 60 Hz engine ticks.
+                    "score_ticks": int(round(point.get("holdScoreSecs", 0) * 60)),
+                    "capture_score": int(point.get("captureScore", 0)),
+                    "hold_score": int(point.get("holdScore", 0)),
+                }],
+                "entries": entries,
+            }
         elif plugin.get("def") == "drop_gen":
             if 116 not in plugin.get("drops", []):
                 continue
@@ -158,9 +219,12 @@ def build_map(world: dict, map_id: str) -> dict:
         rect = depot["rect"]
         all_x += [rect[0], rect[0] + rect[2]]
         all_y += [rect[1], rect[1] + rect[3]]
-    if objective is not None:
-        all_x += [objective[0], objective[0] + objective[2]]
-        all_y += [objective[1], objective[1] + objective[3]]
+    if control_points is not None:
+        half_w = control_points["points"][0]["dimensions"][0] * 0.5
+        half_h = control_points["points"][0]["dimensions"][1] * 0.5
+        for entry in control_points["entries"]:
+            all_x += [entry[0] - half_w, entry[0] + half_w]
+            all_y += [entry[1] - half_h, entry[1] + half_h]
     min_x, min_y = min(all_x), min(all_y)
     max_x, max_y = max(all_x), max(all_y)
     bounds = [
@@ -173,16 +237,19 @@ def build_map(world: dict, map_id: str) -> dict:
     data = {
         "id": map_id,
         "bounds": bounds,
+        "borders": border_lines,
         "solids": solids,
         "platforms": platform_rects,
+        "platform_shapes": platform_shapes,
         "platform_hatchway": platform_hatchway,
         "jump_pads": jump_pads,
         "spawns": spawns,
         "drop_spawns": drop_spawns,
         "drop_depots": drop_depots,
+        "supply_spawners": supply_spawners,
     }
-    if objective is not None:
-        data["objective"] = objective
+    if control_points is not None:
+        data["control_points"] = control_points
     return data
 
 

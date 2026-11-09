@@ -96,6 +96,7 @@ constexpr Entry kEntries[] = {
     {"hud.red_capturing", "RED CAPTURING", "红队占领中"},
     {"hud.respawn_in", "RESPAWN IN", "复活倒计时"},
     {"hud.waiting_respawn", "WAITING TO RESPAWN", "等待复活"},
+    {"hud.shocked", "SHOCKED", "被电击"},
     {"pause.eyebrow", "SIMULATION PAUSED", "模拟已暂停"},
     {"pause.title", "PAUSED", "已暂停"},
     {"pause.description", "The local simulation is frozen. Resume when you are ready.", "本地模拟已冻结，准备好后继续。"},
