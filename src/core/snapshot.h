@@ -12,7 +12,7 @@
 
 namespace nsync::core {
 
-inline constexpr std::uint32_t kSnapshotVersion = 19;
+inline constexpr std::uint32_t kSnapshotVersion = 20;
 inline constexpr std::uint32_t kSnapshotMaxPlayers = 256;
 inline constexpr std::uint32_t kSnapshotMaxControlPoints = 64;
 inline constexpr std::uint32_t kSnapshotMaxControlPointEntries = 256;

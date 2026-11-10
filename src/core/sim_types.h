@@ -26,6 +26,7 @@ struct Player {
     std::uint16_t weapon_switch_cooldown = 0;
     std::array<std::uint16_t, kGadgetSlots> gadget_cooldowns{};
     std::array<std::uint16_t, kGadgetSlots> gadget_active_ticks{};
+    std::array<Fix32, kGadgetSlots> gadget_fuel{};
     std::uint16_t invulnerable_ticks = 0;
     std::uint16_t heal_ticks = 0;
     std::uint16_t heal_interval = 0;

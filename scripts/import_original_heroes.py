@@ -6,11 +6,11 @@ data-driven: a packed RGBA atlas, an atlas JSON compatible with core::Atlas, and
 rig JSON consumed by the client. The source assets remain outside the runtime.
 
 Default input is the AssetRipper export provided for this project and the existing
-reference/nsync/extracted/sprites directory. Override the paths when needed:
+reference/onraid/extracted/sprites directory. Override the paths when needed:
 
     py -3 scripts/import_original_heroes.py \
         --assets-root "E:/path/to/Assets" \
-        --sprite-root "reference/nsync/extracted/sprites" \
+        --sprite-root "reference/onraid/extracted/sprites" \
         --out-dir "assets/generated/original_heroes" \
         --rig-out "assets/data/hero_rigs.json"
 """
@@ -36,7 +36,7 @@ DEFAULT_ASSETS_ROOT = Path(
     r"E:\迅雷下载\AssetRipper_win_x64\t4t4t"
     r"\AssetRipper_export_20261030_112341\Assets"
 )
-DEFAULT_SPRITE_ROOT = REPO_ROOT / "reference" / "nsync" / "extracted" / "sprites"
+DEFAULT_SPRITE_ROOT = REPO_ROOT / "reference" / "onraid" / "extracted" / "sprites"
 DEFAULT_OUT_DIR = REPO_ROOT / "assets" / "generated" / "original_heroes"
 DEFAULT_RIG_OUT = REPO_ROOT / "assets" / "data" / "hero_rigs.json"
 
@@ -196,6 +196,18 @@ WEAPON_SPRITES = {
     "smg": "minigun1",
     "burst": "LaserGun1",
     "grenade": "grenade1",
+}
+
+# Per-hero extra weapons. Warrioress uses a melee axe by default; the extracted
+# sprite set has no axe1.png, so use the closest axe variant.
+HERO_WEAPON_OVERRIDES = {
+    "warrioress": {"axe": "axe7"},
+}
+
+# Some weapons have their own attach node in the hero prefab (with a grip
+# rotation), instead of using the generic gun attach.
+WEAPON_ATTACH_SUFFIXES = {
+    "axe": "allWeaponAnim/axeAnim/pirateAxe",
 }
 
 # Part role, sprite, sorting order. Sorting orders follow the original prefab's
@@ -406,6 +418,7 @@ def build_hero_parts(
 def build_weapons(
     assets_root: Path,
     matrices: dict[str, tuple[float, float, float, float, float, float]],
+    weapon_sprites: dict[str, str],
 ) -> list[dict]:
     matrix = None
     for suffix in WEAPON_NODE_CANDIDATES:
@@ -416,16 +429,26 @@ def build_weapons(
     if matrix is None:
         raise ValueError("no common weapon attach node found")
     weapons: list[dict] = []
-    for weapon_id, sprite_name in WEAPON_SPRITES.items():
+    for weapon_id, sprite_name in weapon_sprites.items():
+        weapon_matrix = matrix
+        attach_suffix = WEAPON_ATTACH_SUFFIXES.get(weapon_id)
+        if attach_suffix:
+            matches = [
+                value
+                for path, value in matrices.items()
+                if path.endswith("/" + attach_suffix)
+            ]
+            if len(matches) == 1:
+                weapon_matrix = matches[0]
         sprite = read_sprite_json(assets_root / "Resources" / f"{sprite_name}.json")
         corners, uvs = ordered_quad(sprite["points"])
-        transformed = [transform_point(matrix, point) for point in corners]
+        transformed = [transform_point(weapon_matrix, point) for point in corners]
         weapons.append(
             {
                 "id": weapon_id,
                 "sprite": f"weapon_{weapon_id}",
                 "z": 22,
-                "pivot": list(transform_point(matrix, (0.0, 0.0))),
+                "pivot": list(transform_point(weapon_matrix, (0.0, 0.0))),
                 "quad": [list(point) for point in transformed],
                 "uv": [list(uv) for uv in uvs],
                 "_sprite_name": sprite_name,
@@ -559,7 +582,9 @@ def main() -> int:
         matrices = find_node_matrices(glb)
 
         parts = build_hero_parts(spec, assets_root, matrices)
-        weapons = build_weapons(assets_root, matrices)
+        weapon_sprites = dict(WEAPON_SPRITES)
+        weapon_sprites.update(HERO_WEAPON_OVERRIDES.get(spec.hero_id, {}))
+        weapons = build_weapons(assets_root, matrices, weapon_sprites)
         parts, weapons = normalize_rig(parts, weapons)
 
         for part in parts:

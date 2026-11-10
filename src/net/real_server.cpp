@@ -1210,8 +1210,7 @@ void RealServer::start_match(std::uint32_t now_ms) {
             player.hero = session.hero;
             player.health = core::Fix32::from_int(hero.health);
             player.shield = hero.shield;
-            player.gadget_cooldowns.fill(0);
-            player.gadget_active_ticks.fill(0);
+            core::reset_player_gadgets(player);
             player.invulnerable_ticks = 0;
             player.heal_ticks = 0;
             player.heal_interval = 0;

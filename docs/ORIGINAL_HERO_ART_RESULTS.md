@@ -116,6 +116,7 @@ Release 平均约 **0.020–0.024 ms/帧**，为目标 0.5 ms 的约 **4–5%**�
 ### 2.4 未完全覆盖
 
 - 未做逐帧原版动画对照；当前动作是程序化近似，不宣称复刻 `ScoutIdle` 等 clip。
+  （例外：Warrioress 斧头 `AxeBeats` / `AxeBeats2` 已做逐帧对照，见 `docs/MELEE_ANIMATION_NOTES.md`。）
 - 未做 7 套皮肤；只接基础皮肤 1。
 - 未做原版粒子/头像/技能图标/骨骼蒙皮。
 - 自动 watcher 文件变更未单独做长时验收；F5 手动重载已验证，watcher 代码路径与既有 content/map 路径共用。

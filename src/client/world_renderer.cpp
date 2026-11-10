@@ -603,12 +603,19 @@ void draw_rig_piece(
     float seconds,
     float recoil_pulse,
     float extra_rotation,
+    float extra_offset_x,
+    float extra_offset_y,
+    const core::HeroPoint& group_pivot,
+    float group_rotation,
+    float group_offset_x,
+    float group_offset_y,
     float root_rotation,
     float root_offset_x,
     float root_offset_y,
     float origin_x,
     float origin_y,
     bool flip,
+    bool mirror_uv,
     std::uint8_t alpha,
     QuadBatch* flash_batch,
     std::uint8_t flash_alpha) {
@@ -641,8 +648,11 @@ void draw_rig_piece(
     for (std::size_t i = 0; i < 4; ++i) {
         core::HeroPoint point =
             rotate_point(quad[i], pivot, sample.rotation + extra_rotation);
-        point.x += sample.offset_x;
-        point.y += sample.offset_y;
+        point.x += sample.offset_x + extra_offset_x;
+        point.y += sample.offset_y + extra_offset_y;
+        point = rotate_point(point, group_pivot, group_rotation);
+        point.x += group_offset_x;
+        point.y += group_offset_y;
         point = rotate_point(point, root_pivot, root_rotation);
         point.x += root_offset_x;
         point.y += root_offset_y;
@@ -655,8 +665,14 @@ void draw_rig_piece(
         point.x += origin_x;
         point.y = origin_y - point.y;
         corners[i] = point;
+        // The rig quads are mirrored by the GLB export while the sprite
+        // atlas is not, so part sprites must mirror their U to stay attached
+        // to the same anatomy.
+        const float local_u = mirror_uv
+            ? 1.0f - local_uv[i].x
+            : local_uv[i].x;
         uvs[i] = core::HeroPoint{
-            u0 + (u1 - u0) * local_uv[i].x,
+            u0 + (u1 - u0) * local_u,
             v0 + (v1 - v0) * local_uv[i].y};
     }
 
@@ -862,6 +878,464 @@ void draw_sliced_bar_fill(
     }
 }
 
+struct MeleeBonePose {
+    float rotation = 0.0f;
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+    core::HeroPoint pivot{};
+    bool animated = false;
+};
+
+struct MeleeBoneKey {
+    float time;
+    float angle_deg;
+    float offset_x;
+    float offset_y;
+};
+
+MeleeBonePose sample_melee_bone_keys(
+    std::span<const MeleeBoneKey> keys,
+    core::HeroPoint pivot,
+    std::string_view role,
+    float progress) {
+    const float time =
+        std::clamp(progress, 0.0f, 1.0f) * keys.back().time;
+    std::size_t index = 0;
+    while (index + 2 < keys.size() && time > keys[index + 1].time) {
+        ++index;
+    }
+    const MeleeBoneKey& a = keys[index];
+    const MeleeBoneKey& b = keys[index + 1];
+    const float span = std::max(0.0001f, b.time - a.time);
+    const float t = std::clamp((time - a.time) / span, 0.0f, 1.0f);
+    MeleeBonePose pose;
+    // The rig quads in hero_rigs.json come from the x-mirrored GLB export
+    // (glTF x = -Unity x), so the Unity clip rotation is negated here.
+    pose.rotation =
+        -lerp_float(a.angle_deg, b.angle_deg, t) * kPi / 180.0f;
+    // The tables store (unity_local - glb_rest) * scale. Since the GLB rest
+    // is the mirrored Unity rest, the mirrored delta is
+    // -((unity_local - glb_rest) + 2 * glb_rest) = -table - 2 * rest.
+    float rest_x = 0.0f;
+    if (role == "body") {
+        rest_x = -0.082333f;
+    } else if (role == "head") {
+        rest_x = -0.011984f;
+    } else if (role == "shoulder_back") {
+        rest_x = 0.221702f;
+    } else if (role == "shoulder_front") {
+        rest_x = -0.378693f;
+    } else if (role == "weapon") {
+        rest_x = 0.294805f;
+    }
+    pose.offset_x =
+        -(lerp_float(a.offset_x, b.offset_x, t) + rest_x * 2.0f);
+    pose.offset_y = lerp_float(a.offset_y, b.offset_y, t);
+    pose.pivot = pivot;
+    pose.animated = true;
+    return pose;
+}
+
+// Keys are the original WarrioressAxeBeats streamed curves, sampled at 60 Hz.
+// The clip uses Unity local transforms; the rig and renderer use the mirrored
+// GLB space, so x and rotation are negated when sampled. Offsets are in the
+// normalized rig space used by hero_rigs.json.
+MeleeBonePose sample_melee_bone_pose(
+    std::string_view role,
+    float progress,
+    int variant) {
+    constexpr MeleeBoneKey body_keys[] = {
+    {0.0000f, 0.000000f, 0.164688f, 0.073821f},
+    {0.0167f, -1.329063f, 0.163056f, 0.106178f},
+    {0.0333f, -2.744955f, 0.161424f, 0.138534f},
+    {0.0500f, -4.182554f, 0.158475f, 0.151716f},
+    {0.0667f, -5.576739f, 0.155526f, 0.164899f},
+    {0.0833f, -6.862388f, 0.166680f, 0.159306f},
+    {0.1000f, -7.974381f, 0.177833f, 0.153714f},
+    {0.1167f, -8.847596f, 0.188987f, 0.148121f},
+    {0.1333f, -9.570698f, 0.185991f, 0.148920f},
+    {0.1500f, -10.212071f, 0.182995f, 0.149719f},
+    {0.1667f, -10.676169f, 0.179999f, 0.150518f},
+    {0.1833f, -10.867449f, 0.177003f, 0.151317f},
+    {0.2000f, -10.690367f, 0.174007f, 0.152116f},
+    {0.2167f, -10.049378f, 0.171011f, 0.152915f},
+    {0.2333f, -8.585968f, 0.115406f, 0.132542f},
+    {0.2500f, -6.342920f, 0.059800f, 0.112170f},
+    {0.2667f, -3.826638f, 0.004195f, 0.091797f},
+    {0.2833f, -1.543530f, -0.051411f, 0.071424f},
+    {0.3000f, -0.000002f, -0.107016f, 0.051051f},
+    {0.3167f, 0.697872f, -0.110811f, 0.053049f},
+    {0.3333f, 0.893277f, -0.114606f, 0.055046f},
+    {0.3500f, 0.753703f, -0.118401f, 0.057043f},
+    {0.3667f, 0.446639f, -0.122196f, 0.059041f},
+    {0.3833f, 0.139575f, -0.125991f, 0.061038f},
+    {0.4000f, 0.000001f, -0.129786f, 0.063035f},
+    {0.4167f, 0.000000f, -0.099027f, 0.066764f},
+    {0.4333f, 0.000000f, -0.068268f, 0.070492f},
+    {0.4500f, 0.000000f, -0.037509f, 0.074220f},
+    {0.4667f, 0.000000f, -0.006751f, 0.077949f},
+    {0.4833f, 0.000000f, 0.024008f, 0.081677f},
+    {0.5000f, 0.000000f, 0.054767f, 0.085405f},
+    {0.5167f, 0.000000f, 0.085526f, 0.089134f},
+    {0.5333f, 0.000000f, 0.116284f, 0.092862f},
+    {0.5500f, 0.000000f, 0.147043f, 0.096590f},
+    };
+    constexpr MeleeBoneKey head_keys[] = {
+    {0.0000f, 0.000000f, 0.023677f, 0.073102f},
+    {0.0167f, -0.581320f, 0.039402f, 0.099467f},
+    {0.0333f, -1.090923f, 0.055126f, 0.125831f},
+    {0.0500f, -1.743960f, 0.060519f, 0.132422f},
+    {0.0667f, -2.755585f, 0.065912f, 0.139014f},
+    {0.0833f, -4.541006f, 0.085885f, 0.146603f},
+    {0.1000f, -6.708920f, 0.105858f, 0.154193f},
+    {0.1167f, -8.264710f, 0.125832f, 0.161783f},
+    {0.1333f, -9.032433f, 0.124234f, 0.162582f},
+    {0.1500f, -9.497173f, 0.122636f, 0.163381f},
+    {0.1667f, -9.655851f, 0.121038f, 0.164180f},
+    {0.1833f, -9.505387f, 0.119440f, 0.164979f},
+    {0.2000f, -9.042700f, 0.117842f, 0.165778f},
+    {0.2167f, -8.264710f, 0.116245f, 0.166577f},
+    {0.2333f, -6.840977f, 0.046498f, 0.144526f},
+    {0.2500f, -4.742843f, -0.023248f, 0.122476f},
+    {0.2667f, -2.419910f, -0.092995f, 0.100425f},
+    {0.2833f, -0.321776f, -0.162741f, 0.078375f},
+    {0.3000f, 1.101958f, -0.232488f, 0.056324f},
+    {0.3167f, 1.760924f, -0.236283f, 0.058322f},
+    {0.3333f, 1.961760f, -0.240078f, 0.060319f},
+    {0.3500f, 1.850374f, -0.243873f, 0.062316f},
+    {0.3667f, 1.572673f, -0.247668f, 0.064314f},
+    {0.3833f, 1.274566f, -0.251463f, 0.066311f},
+    {0.4000f, 1.101960f, -0.255258f, 0.068308f},
+    {0.4167f, 1.027891f, -0.226230f, 0.071504f},
+    {0.4333f, 0.931148f, -0.197202f, 0.074700f},
+    {0.4500f, 0.816266f, -0.168174f, 0.077895f},
+    {0.4667f, 0.687780f, -0.139146f, 0.081091f},
+    {0.4833f, 0.550224f, -0.110119f, 0.084287f},
+    {0.5000f, 0.408133f, -0.081091f, 0.087483f},
+    {0.5167f, 0.266042f, -0.052063f, 0.090678f},
+    {0.5333f, 0.128486f, -0.023035f, 0.093874f},
+    {0.5500f, 0.000000f, 0.005992f, 0.097070f},
+    };
+    constexpr MeleeBoneKey shoulder_back_keys[] = {
+    {0.0000f, -2.964432f, -0.443405f, 0.074300f},
+    {0.0167f, -3.303012f, -0.441608f, 0.128228f},
+    {0.0333f, -3.600752f, -0.439810f, 0.182156f},
+    {0.0500f, -3.888281f, -0.440378f, 0.204326f},
+    {0.0667f, -4.196230f, -0.440945f, 0.226496f},
+    {0.0833f, -4.555231f, -0.426186f, 0.225298f},
+    {0.1000f, -4.995912f, -0.411427f, 0.224100f},
+    {0.1167f, -5.548905f, -0.396668f, 0.222901f},
+    {0.1333f, -6.911124f, -0.395470f, 0.222901f},
+    {0.1500f, -9.198127f, -0.394271f, 0.222901f},
+    {0.1667f, -11.568514f, -0.393073f, 0.222901f},
+    {0.1833f, -13.180881f, -0.391875f, 0.222901f},
+    {0.2000f, -13.193827f, -0.390676f, 0.222901f},
+    {0.2167f, -10.765947f, -0.389478f, 0.222901f},
+    {0.2333f, -4.411653f, -0.441009f, 0.183354f},
+    {0.2500f, 5.327832f, -0.492540f, 0.143807f},
+    {0.2667f, 16.253684f, -0.544071f, 0.104260f},
+    {0.2833f, 26.167067f, -0.595601f, 0.064713f},
+    {0.3000f, 32.869165f, -0.647132f, 0.025166f},
+    {0.3167f, 36.175881f, -0.656520f, 0.027164f},
+    {0.3333f, 37.632628f, -0.665907f, 0.029161f},
+    {0.3500f, 37.634871f, -0.675295f, 0.031158f},
+    {0.3667f, 36.578075f, -0.684682f, 0.033155f},
+    {0.3833f, 34.857686f, -0.694070f, 0.035153f},
+    {0.4000f, 32.869172f, -0.703457f, 0.037150f},
+    {0.4167f, 30.460604f, -0.676560f, 0.043808f},
+    {0.4333f, 27.314717f, -0.649662f, 0.050466f},
+    {0.4500f, 23.578981f, -0.622765f, 0.057123f},
+    {0.4667f, 19.400850f, -0.595868f, 0.063781f},
+    {0.4833f, 14.927796f, -0.568971f, 0.070439f},
+    {0.5000f, 10.307279f, -0.542073f, 0.077097f},
+    {0.5167f, 5.686758f, -0.515176f, 0.083754f},
+    {0.5333f, 1.213701f, -0.488279f, 0.090412f},
+    {0.5500f, -2.964429f, -0.461381f, 0.097070f},
+    };
+    constexpr MeleeBoneKey shoulder_front_keys[] = {
+    {0.0000f, 16.747992f, 0.754989f, 0.086284f},
+    {0.0167f, 15.086531f, 0.758584f, 0.129426f},
+    {0.0333f, 13.364151f, 0.762179f, 0.172568f},
+    {0.0500f, 11.626541f, 0.762530f, 0.190544f},
+    {0.0667f, 9.919390f, 0.762881f, 0.208520f},
+    {0.0833f, 8.288392f, 0.778226f, 0.204526f},
+    {0.1000f, 6.779234f, 0.793571f, 0.200531f},
+    {0.1167f, 5.437607f, 0.808916f, 0.196536f},
+    {0.1333f, 4.180417f, 0.810115f, 0.196536f},
+    {0.1500f, 2.955507f, 0.811313f, 0.196536f},
+    {0.1667f, 1.854976f, 0.812512f, 0.196536f},
+    {0.1833f, 0.970927f, 0.813710f, 0.196536f},
+    {0.2000f, 0.395458f, 0.814908f, 0.196536f},
+    {0.2167f, 0.220673f, 0.816107f, 0.196536f},
+    {0.2333f, 0.571596f, 0.737732f, 0.158188f},
+    {0.2500f, 1.402335f, 0.659357f, 0.119839f},
+    {0.2667f, 2.548613f, 0.580982f, 0.081490f},
+    {0.2833f, 3.846152f, 0.502607f, 0.043142f},
+    {0.3000f, 5.130676f, 0.424232f, 0.004793f},
+    {0.3167f, 6.507515f, 0.417441f, 0.008189f},
+    {0.3333f, 8.100818f, 0.410650f, 0.011584f},
+    {0.3500f, 9.774541f, 0.403859f, 0.014980f},
+    {0.3667f, 11.392635f, 0.397068f, 0.018375f},
+    {0.3833f, 12.819055f, 0.390278f, 0.021771f},
+    {0.4000f, 13.917755f, 0.383487f, 0.025166f},
+    {0.4167f, 14.686564f, 0.422767f, 0.034487f},
+    {0.4333f, 15.242403f, 0.462048f, 0.043808f},
+    {0.4500f, 15.627863f, 0.501329f, 0.053128f},
+    {0.4667f, 15.885540f, 0.540609f, 0.062449f},
+    {0.4833f, 16.058031f, 0.579890f, 0.071770f},
+    {0.5000f, 16.187927f, 0.619171f, 0.081091f},
+    {0.5167f, 16.317825f, 0.658451f, 0.090412f},
+    {0.5333f, 16.490312f, 0.697732f, 0.099733f},
+    {0.5500f, 16.747992f, 0.737013f, 0.109054f},
+    };
+    constexpr MeleeBoneKey weapon_keys[] = {
+    {0.0000f, 0.000000f, -0.580023f, 0.046737f},
+    {0.0167f, -8.558282f, -0.777158f, 0.441608f},
+    {0.0333f, -24.484619f, -0.974294f, 0.836479f},
+    {0.0500f, -67.176265f, -0.502726f, 1.376355f},
+    {0.0667f, -107.913677f, -0.031158f, 1.916232f},
+    {0.0833f, -120.481406f, 0.092915f, 2.005232f},
+    {0.1000f, -120.619378f, 0.216988f, 2.094232f},
+    {0.1167f, -121.189590f, 0.341061f, 2.183233f},
+    {0.1333f, -129.588916f, 0.485348f, 2.128147f},
+    {0.1500f, -142.065539f, 0.629635f, 2.073061f},
+    {0.1667f, -154.758286f, 0.773922f, 2.017975f},
+    {0.1833f, -163.805953f, 0.918209f, 1.962889f},
+    {0.2000f, -165.347392f, 1.062496f, 1.907803f},
+    {0.2167f, -155.521441f, 1.206783f, 1.852717f},
+    {0.2333f, -116.206040f, 0.059920f, 1.885073f},
+    {0.2500f, -75.109386f, -0.894002f, 1.285877f},
+    {0.2667f, -32.733362f, -1.114506f, 0.597999f},
+    {0.2833f, 6.670598f, -0.886812f, 0.110253f},
+    {0.3000f, 38.851077f, -0.659117f, -0.377494f},
+    {0.3167f, 60.206737f, -0.549579f, -0.530441f},
+    {0.3333f, 69.928968f, -0.440041f, -0.683388f},
+    {0.3500f, 68.391311f, -0.487021f, -0.621895f},
+    {0.3667f, 59.353972f, -0.534000f, -0.560401f},
+    {0.3833f, 47.834683f, -0.580979f, -0.498907f},
+    {0.4000f, 38.851134f, -0.627958f, -0.437414f},
+    {0.4167f, 33.170301f, -0.624629f, -0.381089f},
+    {0.4333f, 28.128875f, -0.621301f, -0.324765f},
+    {0.4500f, 23.598956f, -0.617972f, -0.268440f},
+    {0.4667f, 19.452667f, -0.614643f, -0.212116f},
+    {0.4833f, 15.562135f, -0.611314f, -0.155791f},
+    {0.5000f, 11.799479f, -0.607985f, -0.099467f},
+    {0.5167f, 8.036825f, -0.604656f, -0.043142f},
+    {0.5333f, 4.146294f, -0.601327f, 0.013182f},
+    {0.5500f, 0.000003f, -0.597999f, 0.069507f},
+    };
+
+    // AxeBeats2 is the alternate 0.5333 s clip selected by the original
+    // controller via its random integer animation index.
+    constexpr MeleeBoneKey body_keys2[] = {
+    {0.0000f, 0.000000f, 0.164688f, 0.073821f},
+    {0.0167f, -1.888766f, 0.191838f, 0.067829f},
+    {0.0333f, -3.855189f, 0.218988f, 0.061837f},
+    {0.0500f, -5.782783f, 0.246138f, 0.055845f},
+    {0.0667f, -7.555064f, 0.273288f, 0.049853f},
+    {0.0833f, -9.055542f, 0.300438f, 0.043861f},
+    {0.1000f, -10.247737f, 0.298794f, 0.044281f},
+    {0.1167f, -11.189106f, 0.297149f, 0.044701f},
+    {0.1333f, -11.904087f, 0.295505f, 0.045121f},
+    {0.1500f, -12.417115f, 0.293861f, 0.045541f},
+    {0.1667f, -13.825190f, 0.293861f, 0.045541f},
+    {0.1833f, -12.417116f, 0.293861f, 0.045541f},
+    {0.2000f, -2.472714f, 0.294784f, 0.040575f},
+    {0.2167f, 8.431289f, 0.295706f, 0.035608f},
+    {0.2333f, 12.269685f, -0.027922f, -0.010067f},
+    {0.2500f, 11.872917f, -0.160944f, -0.024447f},
+    {0.2667f, 9.697010f, -0.279585f, -0.024447f},
+    {0.2833f, 6.337380f, -0.331116f, 0.027084f},
+    {0.3000f, 2.389440f, -0.297860f, 0.027084f},
+    {0.3167f, -1.551390f, -0.264605f, 0.027084f},
+    {0.3333f, -4.889700f, -0.231350f, 0.027084f},
+    {0.3500f, -7.030075f, -0.198094f, 0.027084f},
+    {0.3667f, -7.377101f, -0.029143f, 0.030529f},
+    {0.3833f, -3.879452f, 0.052070f, 0.031799f},
+    {0.4000f, 2.519179f, 0.133282f, 0.033069f},
+    {0.4167f, 7.921767f, 0.214494f, 0.034339f},
+    {0.4333f, 8.431256f, 0.295706f, 0.035608f},
+    {0.4500f, -1.709031f, 0.294784f, 0.040575f},
+    {0.4667f, -12.417046f, 0.293861f, 0.045541f},
+    {0.4833f, -12.605290f, 0.297149f, 0.044701f},
+    {0.5000f, -9.055547f, 0.300438f, 0.043861f},
+    {0.5167f, -4.883641f, 0.232563f, 0.058841f},
+    {0.5333f, -0.000008f, 0.164688f, 0.073821f},
+    };
+    constexpr MeleeBoneKey head_keys2[] = {
+    {0.0000f, 0.000000f, 0.023677f, 0.073102f},
+    {0.0167f, -1.888766f, 0.065679f, 0.068308f},
+    {0.0333f, -3.855189f, 0.107681f, 0.063515f},
+    {0.0500f, -5.782783f, 0.149683f, 0.058721f},
+    {0.0667f, -7.555064f, 0.191685f, 0.053928f},
+    {0.0833f, -9.055542f, 0.233687f, 0.049134f},
+    {0.1000f, -10.247737f, 0.238998f, 0.049297f},
+    {0.1167f, -11.189106f, 0.244309f, 0.049460f},
+    {0.1333f, -11.904087f, 0.249620f, 0.049624f},
+    {0.1500f, -12.417115f, 0.254931f, 0.049787f},
+    {0.1667f, -13.825190f, 0.254931f, 0.049787f},
+    {0.1833f, -12.417116f, 0.254931f, 0.049787f},
+    {0.2000f, -2.472714f, 0.170560f, 0.034908f},
+    {0.2167f, 8.431289f, 0.086189f, 0.020030f},
+    {0.2333f, 12.269685f, -0.267241f, -0.035952f},
+    {0.2500f, 11.872917f, -0.400263f, -0.050333f},
+    {0.2667f, 9.697010f, -0.518904f, -0.050333f},
+    {0.2833f, 6.337380f, -0.570435f, 0.001198f},
+    {0.3000f, 2.389440f, -0.537180f, 0.001198f},
+    {0.3167f, -1.551390f, -0.503924f, 0.001198f},
+    {0.3333f, -4.889700f, -0.470669f, 0.001198f},
+    {0.3500f, -7.030075f, -0.437413f, 0.001198f},
+    {0.3667f, -7.377101f, -0.109542f, 0.035643f},
+    {0.3833f, -3.879452f, -0.060610f, 0.031739f},
+    {0.4000f, 2.519179f, -0.011677f, 0.027836f},
+    {0.4167f, 7.921767f, 0.037256f, 0.023933f},
+    {0.4333f, 8.431256f, 0.086189f, 0.020030f},
+    {0.4500f, -1.709031f, 0.170560f, 0.034908f},
+    {0.4667f, -12.417046f, 0.254931f, 0.049787f},
+    {0.4833f, -12.605290f, 0.244309f, 0.049460f},
+    {0.5000f, -9.055547f, 0.233687f, 0.049134f},
+    {0.5167f, -4.883641f, 0.128682f, 0.061118f},
+    {0.5333f, -0.000008f, 0.023677f, 0.073102f},
+    };
+    constexpr MeleeBoneKey shoulder_back_keys2[] = {
+    {0.0000f, -2.964432f, -0.443405f, 0.074300f},
+    {0.0167f, -4.853199f, -0.408412f, 0.077416f},
+    {0.0333f, -6.819624f, -0.373419f, 0.080532f},
+    {0.0500f, -8.747221f, -0.338426f, 0.083648f},
+    {0.0667f, -10.519500f, -0.303433f, 0.086764f},
+    {0.0833f, -12.019975f, -0.268440f, 0.089879f},
+    {0.1000f, -13.212155f, -0.266053f, 0.094067f},
+    {0.1167f, -14.153508f, -0.263665f, 0.098254f},
+    {0.1333f, -14.868471f, -0.261278f, 0.102442f},
+    {0.1500f, -15.381486f, -0.258891f, 0.106629f},
+    {0.1667f, -16.789558f, -0.258891f, 0.106629f},
+    {0.1833f, -15.381487f, -0.258891f, 0.106629f},
+    {0.2000f, -5.437077f, -0.300063f, 0.048162f},
+    {0.2167f, 5.466933f, -0.341235f, -0.010306f},
+    {0.2333f, 9.305329f, -0.675894f, -0.079094f},
+    {0.2500f, 8.908555f, -0.808916f, -0.093475f},
+    {0.2667f, 6.732638f, -0.927556f, -0.093475f},
+    {0.2833f, 3.372997f, -0.979088f, -0.041944f},
+    {0.3000f, -0.574955f, -0.945832f, -0.041944f},
+    {0.3167f, -4.515795f, -0.912577f, -0.041944f},
+    {0.3333f, -7.854114f, -0.879321f, -0.041944f},
+    {0.3500f, -9.994493f, -0.846066f, -0.041944f},
+    {0.3667f, -10.341518f, -0.605920f, 0.068281f},
+    {0.3833f, -6.843859f, -0.539749f, 0.048634f},
+    {0.4000f, -0.445207f, -0.473577f, 0.028987f},
+    {0.4167f, 4.957399f, -0.407406f, 0.009341f},
+    {0.4333f, 5.466901f, -0.341235f, -0.010306f},
+    {0.4500f, -4.673390f, -0.300063f, 0.048161f},
+    {0.4667f, -15.381417f, -0.258891f, 0.106629f},
+    {0.4833f, -15.569694f, -0.263665f, 0.098254f},
+    {0.5000f, -12.019980f, -0.268440f, 0.089879f},
+    {0.5167f, -7.848078f, -0.355923f, 0.082090f},
+    {0.5333f, -2.964441f, -0.443405f, 0.074300f},
+    };
+    constexpr MeleeBoneKey shoulder_front_keys2[] = {
+    {0.0000f, 16.747992f, 0.754989f, 0.086284f},
+    {0.0167f, 14.859230f, 0.788064f, 0.070465f},
+    {0.0333f, 12.892811f, 0.821140f, 0.054646f},
+    {0.0500f, 10.965221f, 0.854216f, 0.038828f},
+    {0.0667f, 9.192948f, 0.887291f, 0.023009f},
+    {0.0833f, 7.692475f, 0.920367f, 0.007190f},
+    {0.1000f, 6.500293f, 0.920850f, 0.002800f},
+    {0.1167f, 5.558936f, 0.921333f, -0.001589f},
+    {0.1333f, 4.843967f, 0.921816f, -0.005979f},
+    {0.1500f, 4.330948f, 0.922298f, -0.010369f},
+    {0.1667f, 2.922876f, 0.922298f, -0.010369f},
+    {0.1833f, 4.330948f, 0.922298f, -0.010369f},
+    {0.2000f, 14.275351f, 0.888264f, 0.039326f},
+    {0.2167f, 25.179353f, 0.854229f, 0.089021f},
+    {0.2333f, 29.017748f, 0.514112f, 0.059919f},
+    {0.2500f, 28.620979f, 0.381090f, 0.045539f},
+    {0.2667f, 26.445065f, 0.262449f, 0.045539f},
+    {0.2833f, 23.085429f, 0.210918f, 0.097070f},
+    {0.3000f, 19.137484f, 0.244173f, 0.097070f},
+    {0.3167f, 15.196646f, 0.277429f, 0.097070f},
+    {0.3333f, 11.858332f, 0.310684f, 0.097070f},
+    {0.3500f, 9.717955f, 0.343940f, 0.097070f},
+    {0.3667f, 9.370933f, 0.586427f, 0.002706f},
+    {0.3833f, 12.868587f, 0.653377f, 0.024285f},
+    {0.4000f, 19.267227f, 0.720328f, 0.045863f},
+    {0.4167f, 24.669823f, 0.787278f, 0.067442f},
+    {0.4333f, 25.179320f, 0.854229f, 0.089021f},
+    {0.4500f, 15.039035f, 0.888264f, 0.039326f},
+    {0.4667f, 4.331018f, 0.922298f, -0.010369f},
+    {0.4833f, 4.142752f, 0.921333f, -0.001589f},
+    {0.5000f, 7.692470f, 0.920367f, 0.007190f},
+    {0.5167f, 11.864361f, 0.837678f, 0.046737f},
+    {0.5333f, 16.747984f, 0.754989f, 0.086284f},
+    };
+    constexpr MeleeBoneKey weapon_keys2[] = {
+    {0.0000f, 0.000000f, -0.580023f, 0.046737f},
+    {0.0167f, -10.837217f, -0.394751f, 0.184553f},
+    {0.0333f, -21.563246f, -0.209479f, 0.322368f},
+    {0.0500f, -31.912233f, -0.024208f, 0.460183f},
+    {0.0667f, -42.129092f, 0.161064f, 0.597998f},
+    {0.0833f, -52.624439f, 0.346336f, 0.735814f},
+    {0.1000f, -64.042061f, 0.434118f, 0.800827f},
+    {0.1167f, -74.185062f, 0.521901f, 0.865840f},
+    {0.1333f, -80.492489f, 0.609683f, 0.930852f},
+    {0.1500f, -83.502046f, 0.697465f, 0.995865f},
+    {0.1667f, -80.858042f, 0.697465f, 0.995865f},
+    {0.1833f, -83.502047f, 0.697465f, 0.995865f},
+    {0.2000f, -102.969043f, 0.557852f, 0.879022f},
+    {0.2167f, -134.686099f, 0.418239f, 0.762178f},
+    {0.2333f, -188.794209f, 0.339145f, 0.384684f},
+    {0.2500f, -228.572055f, 0.061518f, 0.282022f},
+    {0.2667f, -256.665663f, -0.216110f, 0.179360f},
+    {0.2833f, -282.210932f, -0.493738f, 0.076697f},
+    {0.3000f, -325.280549f, -1.055785f, 0.087483f},
+    {0.3167f, -325.280636f, -1.055785f, 0.087483f},
+    {0.3333f, -325.280636f, -1.055785f, 0.087483f},
+    {0.3500f, -325.280785f, -1.055785f, 0.087483f},
+    {0.3667f, -305.473899f, -0.294805f, 0.004794f},
+    {0.3833f, -305.473997f, 0.094673f, -0.142609f},
+    {0.4000f, -293.260404f, 0.479357f, -0.135419f},
+    {0.4167f, -235.370681f, 1.162442f, 0.198934f},
+    {0.4333f, -160.215230f, 0.995865f, 0.592006f},
+    {0.4500f, -110.604176f, 0.846665f, 0.793936f},
+    {0.4667f, -83.502088f, 0.697465f, 0.995865f},
+    {0.4833f, -71.094050f, 0.222302f, 0.840074f},
+    {0.5000f, -52.624384f, -0.252861f, 0.684283f},
+    {0.5167f, -27.396779f, -0.416442f, 0.365510f},
+    {0.5333f, -0.000045f, -0.580022f, 0.046738f},
+    };
+
+    if (role == "body") {
+        const core::HeroPoint pivot{-0.133276f, -0.135098f};
+        return variant == 0
+            ? sample_melee_bone_keys(body_keys, pivot, role, progress)
+            : sample_melee_bone_keys(body_keys2, pivot, role, progress);
+    }
+    if (role == "head") {
+        const core::HeroPoint pivot{-0.062931f, 0.334193f};
+        return variant == 0
+            ? sample_melee_bone_keys(head_keys, pivot, role, progress)
+            : sample_melee_bone_keys(head_keys2, pivot, role, progress);
+    }
+    if (role == "shoulder_back") {
+        const core::HeroPoint pivot{0.170756f, 0.086125f};
+        return variant == 0
+            ? sample_melee_bone_keys(shoulder_back_keys, pivot, role, progress)
+            : sample_melee_bone_keys(shoulder_back_keys2, pivot, role, progress);
+    }
+    if (role == "shoulder_front") {
+        const core::HeroPoint pivot{-0.429640f, 0.056166f};
+        return variant == 0
+            ? sample_melee_bone_keys(shoulder_front_keys, pivot, role, progress)
+            : sample_melee_bone_keys(shoulder_front_keys2, pivot, role, progress);
+    }
+    if (role == "weapon") {
+        const core::HeroPoint pivot{0.888194f, -0.436611f};
+        return variant == 0
+            ? sample_melee_bone_keys(weapon_keys, pivot, role, progress)
+            : sample_melee_bone_keys(weapon_keys2, pivot, role, progress);
+    }
+    return MeleeBonePose{};
+}
+
 bool draw_original_hero(
     QuadBatch& batch,
     const core::Atlas& atlas,
@@ -872,6 +1346,9 @@ bool draw_original_hero(
     core::Vec2 aim,
     float state_seconds,
     float recoil_pulse,
+    float melee_swing,
+    bool melee_weapon,
+    std::uint8_t melee_variant,
     float origin_x,
     float origin_y,
     bool flip,
@@ -894,7 +1371,7 @@ bool draw_original_hero(
         seconds / std::max(0.001f, pose->duration),
         0.0f,
         1.0f);
-    const float root_rotation =
+    float root_rotation =
         lerp_float(pose->root_rotation_start, pose->root_rotation_end, progress) *
         kPi /
         180.0f;
@@ -915,11 +1392,23 @@ bool draw_original_hero(
     float weapon_rotation = 0.0f;
     const float aim_x = to_float(aim.x);
     const float aim_y = to_float(aim.y);
-    if (aim_x != 0.0f || aim_y != 0.0f) {
+    if (!melee_weapon && (aim_x != 0.0f || aim_y != 0.0f)) {
         const float local_x = flip ? -aim_x : aim_x;
         const float local_y = -aim_y;
         weapon_rotation = std::atan2(local_y, local_x) - kPi;
     }
+    constexpr float kMeleeRestAngle = 0.0f;
+    if (melee_weapon) {
+        weapon_rotation += kMeleeRestAngle;
+    }
+    const bool melee_pose_active =
+        melee_weapon && melee_swing >= 0.0f;
+    const MeleeBonePose melee_arm = melee_pose_active
+        ? sample_melee_bone_pose("weapon", melee_swing, melee_variant)
+        : MeleeBonePose{};
+    const std::string_view weapon_pose_role = melee_pose_active
+        ? std::string_view{}
+        : std::string_view{"weapon"};
 
     const core::HeroWeapon* weapon = nullptr;
     for (const core::HeroWeapon& candidate : rig.weapons) {
@@ -979,7 +1468,7 @@ bool draw_original_hero(
                 rig,
                 *pose,
                 poses.recoil,
-                "weapon",
+                weapon_pose_role,
                 weapon->sprite,
                 weapon->quad,
                 weapon->uv,
@@ -987,24 +1476,37 @@ bool draw_original_hero(
                 seconds,
                 recoil_pulse,
                 weapon_rotation,
+                0.0f,
+                0.0f,
+                melee_arm.pivot,
+                melee_arm.rotation,
+                melee_arm.offset_x,
+                melee_arm.offset_y,
                 root_rotation,
                 root_offset_x,
                 root_offset_y,
                 origin_x,
                 origin_y,
                 flip,
+                melee_weapon,
                 alpha,
                 flash_batch,
                 flash_alpha);
             weapon_drawn = true;
         }
+        const MeleeBonePose part_bone = melee_pose_active
+            ? sample_melee_bone_pose(part.role, melee_swing, melee_variant)
+            : MeleeBonePose{};
+        const std::string_view part_pose_role = part_bone.animated
+            ? std::string_view{}
+            : std::string_view{part.role};
         draw_rig_piece(
             batch,
             atlas,
             rig,
             *pose,
             poses.recoil,
-            part.role,
+            part_pose_role,
             part.sprite,
             part.quad,
             part.uv,
@@ -1012,12 +1514,19 @@ bool draw_original_hero(
             seconds,
             recoil_pulse,
             0.0f,
+            0.0f,
+            0.0f,
+            part_bone.pivot,
+            part_bone.rotation,
+            part_bone.offset_x,
+            part_bone.offset_y,
             root_rotation,
             root_offset_x,
             root_offset_y,
             origin_x,
             origin_y,
                 flip,
+                true,
                 alpha,
                 flash_batch,
                 flash_alpha);
@@ -1029,7 +1538,7 @@ bool draw_original_hero(
             rig,
             *pose,
             poses.recoil,
-            "weapon",
+            weapon_pose_role,
             weapon->sprite,
             weapon->quad,
             weapon->uv,
@@ -1037,12 +1546,19 @@ bool draw_original_hero(
             seconds,
             recoil_pulse,
             weapon_rotation,
+            0.0f,
+            0.0f,
+            melee_arm.pivot,
+            melee_arm.rotation,
+            melee_arm.offset_x,
+            melee_arm.offset_y,
             root_rotation,
             root_offset_x,
             root_offset_y,
             origin_x,
             origin_y,
                 flip,
+                melee_weapon,
                 alpha,
                 flash_batch,
                 flash_alpha);
@@ -2181,6 +2697,9 @@ bool WorldRenderer::run_original_hero_benchmark(
                     core::Fix32::zero()},
                 seconds,
                 state == core::AnimationState::Shoot ? 1.0f : 0.0f,
+                0.0f,
+                false,
+                0,
                 x,
                 y,
                 (index % 2) != 0,
@@ -3375,6 +3894,13 @@ void WorldRenderer::draw(
             player.health.raw() / core::Fix32::kOne;
         const int shield_value = static_cast<int>(player.shield);
         const int ammo_value = static_cast<int>(player.ammo);
+        const core::WeaponStats* weapon_stats =
+            player.weapon < core::content().weapon_count()
+                ? &core::content().weapon(player.weapon)
+                : nullptr;
+        const bool melee_weapon =
+            weapon_stats != nullptr &&
+            core::weapon_is_melee(weapon_stats->type);
         const bool health_lost =
             visual.last_health >= 0 &&
             health_value < visual.last_health;
@@ -3382,19 +3908,31 @@ void WorldRenderer::draw(
             visual.last_shield >= 0 &&
             shield_value < visual.last_shield;
         const bool fired =
+            !melee_weapon &&
             visual.last_ammo >= 0 &&
             visual.last_weapon == player.weapon &&
             ammo_value < visual.last_ammo &&
             alive;
-        const bool blocked_fire =
+        const bool fresh_melee =
+            melee_weapon && weapon_stats != nullptr &&
+            player.fire_cooldown == weapon_stats->fire_interval;
+        const bool attack_started =
             alive &&
             visual.last_fire_cooldown >= 0 &&
             player.fire_cooldown >
                 static_cast<std::uint16_t>(visual.last_fire_cooldown) &&
-            ammo_value == visual.last_ammo &&
             player.reload_timer == 0 &&
             player.warmup_timer == 0 &&
-            core::button_down(player.buttons, core::kButtonFire);
+            (fresh_melee ||
+             (!melee_weapon &&
+              core::button_down(player.buttons, core::kButtonFire)));
+        const bool melee_swing =
+            melee_weapon && attack_started &&
+            visual.melee_seconds <= 0.0f;
+        const bool blocked_fire =
+            !melee_weapon &&
+            attack_started &&
+            ammo_value == visual.last_ammo;
         const bool died = visual.last_alive && !alive;
         if (health_lost) {
             visual.hurt_seconds = 0.18f;
@@ -3402,7 +3940,7 @@ void WorldRenderer::draw(
             visual.hurt_seconds =
                 std::max(0.0f, visual.hurt_seconds - frame_delta);
         }
-        if (fired) {
+        if (fired || melee_swing) {
             visual.shoot_seconds = 0.16f;
         } else if (visual.shoot_seconds > 0.0f) {
             const float decay = original_ready_
@@ -3413,6 +3951,45 @@ void WorldRenderer::draw(
             if (visual.shoot_seconds < 0.001f) {
                 visual.shoot_seconds = 0.0f;
             }
+        }
+        constexpr float kMeleeSwingSeconds = 0.55f;
+        constexpr float kMeleeSwingSeconds2 = 0.5333333f;
+        if (melee_swing) {
+            const std::uint32_t variant_hash =
+                sim_tick * 747796405U +
+                player.id.raw() * 2891336453U +
+                static_cast<std::uint32_t>(player.weapon) * 277803737U;
+            visual.melee_variant = static_cast<std::uint8_t>(
+                (variant_hash >> 24) & 1U);
+            visual.melee_duration = visual.melee_variant == 0
+                ? kMeleeSwingSeconds
+                : kMeleeSwingSeconds2;
+            visual.melee_seconds = visual.melee_duration;
+            visual.melee_effect_spawned = false;
+        } else if (visual.melee_seconds > 0.0f) {
+            visual.melee_seconds = std::max(
+                0.0f, visual.melee_seconds - frame_delta);
+        }
+        const float melee_duration =
+            visual.melee_duration > 0.0f
+                ? visual.melee_duration
+                : kMeleeSwingSeconds;
+        const float melee_progress = visual.melee_seconds > 0.0f
+            ? 1.0f - visual.melee_seconds / melee_duration
+            : 0.0f;
+        if (melee_weapon && !visual.melee_effect_spawned &&
+            melee_progress >= 0.55f) {
+            EffectVisual effect;
+            effect.kind = EffectKind::Slash;
+            effect.position = displayed.position;
+            effect.direction = player.aim;
+            effect.life_seconds = 0.2f;
+            effect.radius = 1.25f;
+            effect.r = 236;
+            effect.g = 242;
+            effect.b = 255;
+            add_effect(effect);
+            visual.melee_effect_spawned = true;
         }
 
         const core::AnimationState state =
@@ -3434,7 +4011,9 @@ void WorldRenderer::draw(
         }
         const bool use_original = original_rig != nullptr;
         const bool flip_placeholder = player.facing < 0;
-        const bool flip_original = player.facing > 0;
+        // The original prefab faces left; like the placeholder atlas it has
+        // to be mirrored when the player aims right.
+        const bool flip_original = player.facing < 0;
 
         const core::AtlasFrame* frame = nullptr;
         if (!use_original && atlas_ready_) {
@@ -3720,6 +4299,11 @@ void WorldRenderer::draw(
                 player.aim,
                 visual.state_seconds,
                 recoil_pulse,
+                melee_weapon && visual.melee_seconds > 0.0f
+                    ? melee_progress
+                    : -1.0f,
+                melee_weapon,
+                visual.melee_variant,
                 to_float(displayed.position.x),
                 to_float(displayed.position.y),
                 flip_original,
@@ -4974,4 +5558,3 @@ void WorldRenderer::draw(
 }
 
 } // namespace nsync::client
-

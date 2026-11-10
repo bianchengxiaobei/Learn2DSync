@@ -851,6 +851,116 @@ void test_gadgets() {
               hero_gadget_stats(HeroType::Warrioress, 0).cooldown_ticks);
     }
 
+    World dash;
+    dash.set_map(arena);
+    dash.reset(1, 1);
+    Player* dash_user = dash.players().get(EntityId::make(0, 1));
+    CHECK(dash_user != nullptr);
+    if (dash_user != nullptr) {
+        dash_user->hero = static_cast<std::uint8_t>(HeroType::Warrioress);
+        const Vec2 dash_start = dash_user->position;
+        InputFrame press;
+        PlayerCommand command;
+        command.entity = dash_user->id;
+        command.command.tick = dash.tick();
+        command.command.buttons = kButtonGadget1;
+        press.commands.push_back(command);
+        dash.step(press);
+        Fix32 peak_speed = Fix32::abs(dash_user->velocity.x);
+        for (int index = 0; index < 30; ++index) {
+            dash.step(empty);
+            peak_speed =
+                Fix32::max(peak_speed, Fix32::abs(dash_user->velocity.x));
+        }
+        CHECK(peak_speed <= Fix32::from_ratio(1, 2));
+        CHECK(dash_user->position.x - dash_start.x > Fix32::one());
+        CHECK(dash_user->position.x - dash_start.x < Fix32::from_int(8));
+    }
+
+    World air_dash;
+    air_dash.set_map(arena);
+    air_dash.reset(1, 1);
+    Player* air_user = air_dash.players().get(EntityId::make(0, 1));
+    CHECK(air_user != nullptr);
+    if (air_user != nullptr) {
+        air_user->hero = static_cast<std::uint8_t>(HeroType::Warrioress);
+        const Fix32 start_y = air_user->position.y;
+        InputFrame press;
+        PlayerCommand command;
+        command.entity = air_user->id;
+        command.command.tick = air_dash.tick();
+        command.command.buttons = kButtonGadget1;
+        command.command.aim_y = -32767;
+        press.commands.push_back(command);
+        air_dash.step(press);
+        CHECK(air_user->velocity.y < Fix32::zero());
+        for (int index = 0; index < 12; ++index) {
+            air_dash.step(empty);
+        }
+        CHECK(air_user->position.y < start_y - Fix32::from_ratio(1, 2));
+    }
+
+    Map wall_map = Map::default_arena();
+    const AABB dash_wall{
+        Vec2{Fix32::from_ratio(-7, 2), Fix32::from_int(9)},
+        Vec2{Fix32::from_ratio(-338, 100), Fix32::from_int(12)}};
+    wall_map.solids.push_back(dash_wall);
+    World wall_dash;
+    wall_dash.set_map(wall_map);
+    wall_dash.reset(1, 1);
+    Player* wall_user = wall_dash.players().get(EntityId::make(0, 1));
+    CHECK(wall_user != nullptr);
+    if (wall_user != nullptr) {
+        wall_user->hero = static_cast<std::uint8_t>(HeroType::Warrioress);
+        InputFrame press;
+        PlayerCommand command;
+        command.entity = wall_user->id;
+        command.command.tick = wall_dash.tick();
+        command.command.buttons = kButtonGadget1;
+        press.commands.push_back(command);
+        wall_dash.step(press);
+        for (int index = 0; index < 40; ++index) {
+            wall_dash.step(empty);
+        }
+        const AABB wall_box = AABB::from_center(
+            wall_user->position,
+            Vec2{
+                Fix32::from_ratio(35, 100),
+                Fix32::from_ratio(7, 10)});
+        CHECK(wall_user->position.x < dash_wall.min.x);
+        CHECK(!wall_box.overlaps(dash_wall));
+    }
+
+    World jet;
+    jet.set_map(arena);
+    jet.reset(1, 1);
+    Player* jet_user = jet.players().get(EntityId::make(0, 1));
+    CHECK(jet_user != nullptr);
+    if (jet_user != nullptr) {
+        jet_user->hero = static_cast<std::uint8_t>(HeroType::Assault);
+        reset_player_gadgets(*jet_user);
+        const Fix32 start_y = jet_user->position.y;
+        const auto step_buttons = [&](std::uint16_t buttons) {
+            InputFrame frame;
+            PlayerCommand command;
+            command.entity = jet_user->id;
+            command.command.tick = jet.tick();
+            command.command.buttons = buttons;
+            frame.commands.push_back(command);
+            jet.step(frame);
+        };
+        step_buttons(kButtonGadget2 | kButtonJump);
+        CHECK(jet_user->velocity.y < Fix32::zero());
+        CHECK(jet_user->velocity.y >= -Fix32::from_ratio(1, 10));
+        CHECK(jet_user->gadget_active_ticks[1] > 0);
+        for (int index = 0; index < 30; ++index) {
+            step_buttons(kButtonJump);
+            CHECK(jet_user->velocity.y >= -Fix32::from_ratio(1, 10));
+        }
+        CHECK(jet_user->position.y < start_y - Fix32::one());
+        CHECK(jet_user->position.y > start_y - Fix32::from_int(8));
+    }
+
     World droid;
     droid.set_map(arena);
     droid.reset(1, 1);
@@ -919,6 +1029,161 @@ void test_gadgets() {
         CHECK(injector->health.to_int_round() == 104);
     }
 }
+
+void test_jetpack_fuel() {
+    using namespace nsync::core;
+    const Map arena = Map::default_arena();
+    const InputFrame empty;
+
+    const auto prepare = [&](World& world) {
+        world.set_map(arena);
+        world.reset(1, 1);
+        Player* player = world.players().get(EntityId::make(0, 1));
+        CHECK(player != nullptr);
+        if (player != nullptr) {
+            player->hero = static_cast<std::uint8_t>(HeroType::Assault);
+            reset_player_gadgets(*player);
+        }
+        return player;
+    };
+    const auto press_gadget = [](World& world, const Player& player) {
+        InputFrame frame;
+        PlayerCommand command;
+        command.entity = player.id;
+        command.command.tick = world.tick();
+        command.command.buttons = kButtonGadget2;
+        frame.commands.push_back(command);
+        world.step(frame);
+    };
+    const auto step_buttons = [](
+        World& world,
+        const Player& player,
+        std::uint16_t buttons) {
+        InputFrame frame;
+        PlayerCommand command;
+        command.entity = player.id;
+        command.command.tick = world.tick();
+        command.command.buttons = buttons;
+        frame.commands.push_back(command);
+        world.step(frame);
+    };
+
+    World drain;
+    Player* drain_user = prepare(drain);
+    if (drain_user != nullptr) {
+        CHECK(drain_user->gadget_fuel[1] == kJetPackTuning.capacity);
+        press_gadget(drain, *drain_user);
+        CHECK(drain_user->gadget_active_ticks[1] > 0);
+        CHECK(drain_user->gadget_fuel[1] ==
+              kJetPackTuning.capacity -
+                  kJetPackTuning.consumption_per_tick);
+        for (int tick = 0; tick < 299; ++tick) {
+            drain.step(empty);
+        }
+        CHECK(drain_user->gadget_fuel[1] == Fix32::zero());
+        CHECK(drain_user->gadget_active_ticks[1] == 0);
+    }
+
+    World toggle;
+    Player* toggle_user = prepare(toggle);
+    if (toggle_user != nullptr) {
+        press_gadget(toggle, *toggle_user);
+        for (int tick = 0; tick < 5; ++tick) {
+            toggle.step(empty);
+        }
+        toggle.step(empty);
+        press_gadget(toggle, *toggle_user);
+        CHECK(toggle_user->gadget_active_ticks[1] == 0);
+        const Fix32 fuel_after_off = toggle_user->gadget_fuel[1];
+        toggle.step(empty);
+        press_gadget(toggle, *toggle_user);
+        CHECK(toggle_user->gadget_active_ticks[1] == 0);
+        for (int tick = 0; tick < 10; ++tick) {
+            toggle.step(empty);
+        }
+        CHECK(toggle_user->gadget_fuel[1] > fuel_after_off);
+        CHECK(toggle_user->gadget_fuel[1] <=
+              fuel_after_off + Fix32::from_int(6));
+        for (int tick = 0; tick < 60; ++tick) {
+            toggle.step(empty);
+        }
+        toggle.step(empty);
+        press_gadget(toggle, *toggle_user);
+        CHECK(toggle_user->gadget_active_ticks[1] > 0);
+    }
+
+    World gate;
+    Player* gate_user = prepare(gate);
+    if (gate_user != nullptr) {
+        gate_user->gadget_fuel[1] =
+            kJetPackTuning.operating_fuel - Fix32::one();
+        press_gadget(gate, *gate_user);
+        CHECK(gate_user->gadget_active_ticks[1] == 0);
+        CHECK(gate_user->gadget_cooldowns[1] == 0);
+        gate.step(empty);
+        gate_user->gadget_fuel[1] = kJetPackTuning.operating_fuel;
+        press_gadget(gate, *gate_user);
+        CHECK(gate_user->gadget_active_ticks[1] > 0);
+    }
+
+    World shock;
+    Player* shock_user = prepare(shock);
+    if (shock_user != nullptr) {
+        press_gadget(shock, *shock_user);
+        CHECK(shock_user->gadget_active_ticks[1] > 0);
+        shock_user->stun_ticks = 30;
+        shock.step(empty);
+        CHECK(shock_user->gadget_active_ticks[1] == 0);
+    }
+
+    World model;
+    Player* model_user = prepare(model);
+    if (model_user != nullptr) {
+        const Fix32 start_x = model_user->position.x;
+        const Fix32 start_y = model_user->position.y;
+        press_gadget(model, *model_user);
+        for (int tick = 0; tick < 10; ++tick) {
+            model.step(empty);
+        }
+        CHECK(model_user->velocity.x == Fix32::zero());
+        CHECK(model_user->velocity.y == Fix32::zero());
+        CHECK(model_user->position.x == start_x);
+        CHECK(model_user->position.y == start_y);
+        for (int tick = 0; tick < 10; ++tick) {
+            step_buttons(model, *model_user, kButtonJump);
+        }
+        CHECK(model_user->velocity.y < Fix32::zero());
+        CHECK(model_user->velocity.y >= -Fix32::from_ratio(1, 10));
+        CHECK(model_user->position.y < start_y);
+        for (int tick = 0; tick < 10; ++tick) {
+            step_buttons(
+                model,
+                *model_user,
+                kButtonLeft | kButtonJump);
+        }
+        CHECK(model_user->velocity.x < Fix32::zero());
+        CHECK(model_user->velocity.x >= -Fix32::from_ratio(1, 10));
+        CHECK(model_user->velocity.y < Fix32::zero());
+        CHECK(model_user->position.x < start_x);
+        for (int tick = 0; tick < 10; ++tick) {
+            step_buttons(model, *model_user, kButtonDown);
+        }
+        CHECK(model_user->velocity.y > Fix32::zero());
+        CHECK(model_user->velocity.y <= Fix32::from_ratio(1, 10));
+        for (int tick = 0; tick < 10; ++tick) {
+            step_buttons(model, *model_user, kButtonRight);
+        }
+        CHECK(model_user->velocity.x > Fix32::zero());
+        CHECK(model_user->velocity.x <= Fix32::from_ratio(1, 10));
+        const Fix32 before_slowdown = model_user->velocity.x;
+        for (int tick = 0; tick < 10; ++tick) {
+            model.step(empty);
+        }
+        CHECK(model_user->velocity.x < before_slowdown);
+        CHECK(model_user->velocity.x > Fix32::zero());
+    }
+}
+
 void test_weapons_and_match() {
     using namespace nsync::core;
     const Map arena = Map::default_arena();
@@ -1217,6 +1482,17 @@ void test_weapons_and_match() {
     CHECK(hero_weapon(HeroType::Scout) == WeaponType::Rocket);
     CHECK(hero_weapon(HeroType::Gunner) == WeaponType::Smg);
     CHECK(hero_weapon(HeroType::Assault) == WeaponType::Shotgun);
+    CHECK(hero_weapon(HeroType::Warrioress) == WeaponType::Axe);
+    CHECK(weapon_is_melee(WeaponType::Axe));
+    CHECK(weapon_stats(WeaponType::Axe).magazine == 0);
+    CHECK(weapon_stats(WeaponType::Axe).fire_interval == 84);
+    CHECK(weapon_stats(WeaponType::Axe).damage == 65);
+    CHECK(weapon_stats(WeaponType::Axe).range ==
+          Fix32::from_ratio(135, 100));
+    CHECK(weapon_stats(WeaponType::Axe).critical_chance ==
+          Fix32::from_ratio(1, 5));
+    CHECK(weapon_stats(WeaponType::Axe).critical_ratio ==
+          Fix32::from_ratio(3, 10));
     for (std::size_t index = 0; index < content().hero_count(); ++index) {
         Player equipped;
         equipped.hero = static_cast<std::uint8_t>(index);
@@ -1238,6 +1514,8 @@ void test_weapons_and_match() {
         if (shooter != nullptr) {
             shooter->hero = static_cast<std::uint8_t>(index);
             equip_hero_default_weapon(*shooter);
+            const bool melee_weapon =
+                expected != nullptr && weapon_is_melee(expected->type);
             InputFrame fire_input;
             PlayerCommand fire_command;
             fire_command.entity = shooter->id;
@@ -1248,11 +1526,57 @@ void test_weapons_and_match() {
                 fire_command.command.buttons = kButtonFire;
                 fire_input.commands = {fire_command};
                 hero_fire.step(fire_input);
-                fired = !hero_fire.projectiles().empty();
+                fired = melee_weapon
+                    ? shooter->fire_cooldown > 0
+                    : !hero_fire.projectiles().empty();
             }
             CHECK(fired);
         }
     }
+    World melee_world;
+    melee_world.set_map(arena);
+    melee_world.reset(1, 2);
+    Player* melee_attacker =
+        melee_world.players().get(EntityId::make(0, 1));
+    Player* melee_victim =
+        melee_world.players().get(EntityId::make(1, 1));
+    CHECK(melee_attacker != nullptr);
+    CHECK(melee_victim != nullptr);
+    if (melee_attacker != nullptr && melee_victim != nullptr) {
+        melee_attacker->hero =
+            static_cast<std::uint8_t>(HeroType::Warrioress);
+        equip_hero_default_weapon(*melee_attacker);
+        melee_attacker->position =
+            Vec2{Fix32::zero(), Fix32::from_ratio(103, 10)};
+        melee_attacker->velocity = {};
+        melee_attacker->aim = Vec2{Fix32::one(), Fix32::zero()};
+        melee_attacker->facing = 1;
+        melee_victim->position =
+            Vec2{Fix32::one(), Fix32::from_ratio(103, 10)};
+        melee_victim->velocity = {};
+        melee_victim->health = Fix32::from_int(100);
+        melee_victim->shield = 0;
+        melee_victim->invulnerable_ticks = 0;
+        InputFrame melee_fire;
+        PlayerCommand melee_command;
+        melee_command.entity = melee_attacker->id;
+        melee_command.command.tick = melee_world.tick();
+        melee_command.command.buttons = kButtonFire;
+        melee_command.command.aim_x = 32767;
+        melee_fire.commands.push_back(melee_command);
+        melee_world.step(melee_fire);
+        CHECK(melee_world.projectiles().empty());
+        CHECK(melee_victim->health >= Fix32::from_int(15));
+        CHECK(melee_victim->health <= Fix32::from_int(35));
+
+        melee_victim->health = Fix32::from_int(100);
+        melee_victim->position =
+            Vec2{Fix32::from_int(3), Fix32::from_ratio(103, 10)};
+        melee_attacker->fire_cooldown = 0;
+        melee_world.step(melee_fire);
+        CHECK(melee_victim->health == Fix32::from_int(100));
+    }
+
     CHECK(weapon_stats(WeaponType::Smg).magazine == 40);
     CHECK(weapon_stats(WeaponType::Smg).fire_interval == 8);
     CHECK(weapon_stats(WeaponType::Smg).reload_ticks == 132);
@@ -2358,6 +2682,10 @@ void test_snapshot_restore() {
     stats_snapshot.players.front().shield = 30;
     stats_snapshot.players.front().gadget_cooldowns[0] = 123;
     stats_snapshot.players.front().gadget_active_ticks[1] = 7;
+    stats_snapshot.players.front().hero =
+        static_cast<std::uint8_t>(HeroType::Assault);
+    stats_snapshot.players.front().gadget_fuel[1] =
+        Fix32::from_ratio(123, 2);
     stats_snapshot.players.front().invulnerable_ticks = 45;
     stats_snapshot.players.front().shield_regen_delay = 88;
     const std::vector<std::uint8_t> stats_encoded =
@@ -2382,6 +2710,7 @@ void test_snapshot_restore() {
         CHECK(stats_player->shield == 30);
         CHECK(stats_player->gadget_cooldowns[0] == 123);
         CHECK(stats_player->gadget_active_ticks[1] == 7);
+        CHECK(stats_player->gadget_fuel[1] == Fix32::from_ratio(123, 2));
         CHECK(stats_player->invulnerable_ticks == 45);
         CHECK(stats_player->shield_regen_delay == 88);
     }
@@ -3646,6 +3975,7 @@ bool run_determinism_tests(const std::filesystem::path& root) {
     test_byte_io();
     test_map();
     test_gadgets();
+    test_jetpack_fuel();
     test_shock_blocks_actions();
     test_weapons_and_match();
     test_point_blank_weapon_hit();

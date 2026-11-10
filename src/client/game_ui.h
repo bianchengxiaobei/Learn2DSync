@@ -87,6 +87,7 @@ struct UiGadgetSlot {
     int cooldown_percent = 0;
     bool active = false;
     bool ready = false;
+    bool fuel_gadget = false;
 };
 
 struct UiMatchModel {
@@ -104,6 +105,9 @@ struct UiMatchModel {
     int local_max_shield = 0;
     int local_ammo = 0;
     int local_weapon = 0;
+    bool local_melee = false;
+    int local_melee_percent = 100;
+    int local_melee_tenths = 0;
     std::string hero_name;
     std::string weapon_name;
     std::array<UiGadgetSlot, 3> gadgets;
@@ -277,6 +281,9 @@ private:
     std::array<Rml::Element*, 3> hud_gadget_fills_{};
     Rml::Element* hud_weapon_ = nullptr;
     Rml::Element* hud_ammo_ = nullptr;
+    Rml::Element* hud_melee_ = nullptr;
+    Rml::Element* hud_melee_fill_ = nullptr;
+    Rml::Element* hud_melee_state_ = nullptr;
     Rml::Element* hud_vitals_ = nullptr;
     Rml::Element* hud_buff_ = nullptr;
     Rml::Element* hud_death_ = nullptr;

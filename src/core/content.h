@@ -38,7 +38,12 @@ enum class WeaponType : std::uint8_t {
     Smg = 3,
     Burst = 4,
     Grenade = 5,
+    Axe = 6,
 };
+
+[[nodiscard]] constexpr bool weapon_is_melee(WeaponType type) {
+    return type == WeaponType::Axe;
+}
 
 enum class HeroAbilityType : std::uint8_t {
     Dash = 0,

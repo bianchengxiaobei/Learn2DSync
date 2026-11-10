@@ -112,6 +112,10 @@
                 <span id="hud-weapon">RIFLE</span>
                 <span id="hud-ammo">8</span>
             </div>
+            <div id="hud-melee" class="melee-status">
+                <div class="melee-track"><div id="hud-melee-fill"></div></div>
+                <span id="hud-melee-state">READY</span>
+            </div>
         </div>
         <div id="hud-gadgets" class="gadgets">
                 <div class="gadget-card" id="hud-gadget-0">

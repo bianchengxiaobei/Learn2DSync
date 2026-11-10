@@ -12,7 +12,7 @@
 namespace nsync::net {
 
 inline constexpr std::uint32_t kProtocolMagic = 0x4F4E5244U; // "ONRD"
-inline constexpr std::uint16_t kProtocolVersion = 15;
+inline constexpr std::uint16_t kProtocolVersion = 16;
 inline constexpr std::uint32_t kMaxPacketPayload = 128U * 1024U;
 inline constexpr std::size_t kPacketHeaderSize = 20;
 inline constexpr std::uint16_t kDefaultPort = 40100;

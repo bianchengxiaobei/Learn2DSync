@@ -144,6 +144,11 @@ private:
     void respawn_player(Player& player);
     void activate_gadget(Player& player, std::size_t slot);
     void melee_attack(Player& player, const GadgetStats& gadget);
+    void melee_strike(
+        Player& player,
+        Fix32 reach,
+        std::uint16_t damage,
+        Fix32 critical_ratio);
     void spawn_gadget_projectile(
         Player& player,
         const GadgetStats& gadget);
@@ -225,5 +230,6 @@ private:
 };
 
 void equip_hero_default_weapon(Player& player);
+void reset_player_gadgets(Player& player);
 
 } // namespace nsync::core

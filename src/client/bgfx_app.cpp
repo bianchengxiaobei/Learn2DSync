@@ -712,8 +712,7 @@ int run_client(const ClientOptions& options) {
             local->hero = static_cast<std::uint8_t>(selected_hero->type);
             local->health = core::Fix32::from_int(selected_hero->health);
             local->shield = selected_hero->shield;
-            local->gadget_cooldowns.fill(0);
-            local->gadget_active_ticks.fill(0);
+            core::reset_player_gadgets(*local);
             local->invulnerable_ticks = 0;
             local->heal_ticks = 0;
             local->slow_ticks = 0;
@@ -1613,8 +1612,7 @@ int run_client(const ClientOptions& options) {
                 local->hero = static_cast<std::uint8_t>(hero->type);
                 local->health = core::Fix32::from_int(hero->health);
                 local->shield = hero->shield;
-                local->gadget_cooldowns.fill(0);
-                local->gadget_active_ticks.fill(0);
+                core::reset_player_gadgets(*local);
                 local->invulnerable_ticks = 0;
                 local->heal_ticks = 0;
                 local->slow_ticks = 0;
@@ -2851,7 +2849,12 @@ int run_client(const ClientOptions& options) {
                 const float x = fix_to_float(player.position.x);
                 const float y = fix_to_float(player.position.y);
                 const bool local_sound = player.slot == local_slot;
-                if (player.alive != 0 &&
+                const bool melee_weapon =
+                    player.weapon < core::content().weapon_count() &&
+                    core::weapon_is_melee(
+                        core::content().weapon(player.weapon).type);
+                if (!melee_weapon &&
+                    player.alive != 0 &&
                     previous_audio_alive[player.slot] &&
                     player.ammo < previous_ammo[player.slot] &&
                     player.weapon < core::content().weapon_count()) {
@@ -2874,18 +2877,26 @@ int run_client(const ClientOptions& options) {
                 }
                 if (player.alive != 0 &&
                     previous_audio_alive[player.slot] &&
-                    player.ammo == previous_ammo[player.slot] &&
                     player.reload_timer == 0 &&
                     player.warmup_timer == 0 &&
                     player.fire_cooldown >
                         previous_fire_cooldown[player.slot] &&
                     core::button_down(
                         player.buttons, core::kButtonFire)) {
-                    audio.play_at(
-                        AudioCue::ProjectileImpact,
-                        x + static_cast<float>(player.facing) * 0.8f,
-                        y + 0.55f,
-                        local_sound ? 0.4f : 0.3f);
+                    if (melee_weapon) {
+                        audio.play_gadget(
+                            core::GadgetType::RubyBlade,
+                            GadgetSoundKind::Activate,
+                            x + static_cast<float>(player.facing) * 0.8f,
+                            y + 0.55f,
+                            local_sound ? 0.7f : 0.55f);
+                    } else if (player.ammo == previous_ammo[player.slot]) {
+                        audio.play_at(
+                            AudioCue::ProjectileImpact,
+                            x + static_cast<float>(player.facing) * 0.8f,
+                            y + 0.55f,
+                            local_sound ? 0.4f : 0.3f);
+                    }
                 }
                 if (player.alive != 0 && !previous_audio_alive[player.slot]) {
                     audio.play_at(
@@ -3290,8 +3301,36 @@ int run_client(const ClientOptions& options) {
                 local == nullptr ? 0 : local->supply_heal_ticks;
             match_model.local_shock_ticks =
                 local == nullptr ? 0 : local->stun_ticks;
-            match_model.local_ammo =
-                local == nullptr ? 0 : local->ammo;
+            bool local_melee = false;
+            if (local != nullptr &&
+                local->weapon < core::content().weapon_count()) {
+                const core::WeaponStats& stats =
+                    core::content().weapon(local->weapon);
+                local_melee = core::weapon_is_melee(stats.type);
+                if (local_melee) {
+                    const int total =
+                        static_cast<int>(stats.fire_interval);
+                    const int remaining =
+                        static_cast<int>(local->fire_cooldown);
+                    match_model.local_melee = true;
+                    match_model.local_melee_percent = total > 0
+                        ? std::clamp(
+                              (total - remaining) * 100 / total,
+                              0,
+                              100)
+                        : 100;
+                    match_model.local_melee_tenths =
+                        (remaining * 10 + core::kTickRate - 1) /
+                        core::kTickRate;
+                }
+            }
+            if (local == nullptr) {
+                match_model.local_ammo = 0;
+            } else if (local_melee) {
+                match_model.local_ammo = -1;
+            } else {
+                match_model.local_ammo = local->ammo;
+            }
             match_model.local_health =
                 local == nullptr
                     ? 0
@@ -3345,7 +3384,38 @@ int run_client(const ClientOptions& options) {
                               100)
                         : 100;
                     item.active = local->gadget_active_ticks[slot] > 0;
-                    item.ready = cooldown == 0;
+                    if (core::gadget_uses_fuel(gadget.type)) {
+                        const int fuel =
+                            local->gadget_fuel[slot].to_int_round();
+                        const int capacity =
+                            core::kJetPackTuning.capacity.to_int_round();
+                        const int operating =
+                            core::kJetPackTuning.operating_fuel
+                                .to_int_round();
+                        const int refuel_per_second =
+                            (core::kJetPackTuning.refuel_per_tick *
+                             core::Fix32::from_int(core::kTickRate))
+                                .to_int_round();
+                        item.fuel_gadget = true;
+                        item.cooldown_percent = capacity > 0
+                            ? std::clamp(
+                                  fuel * 100 / capacity, 0, 100)
+                            : 0;
+                        const int missing =
+                            std::max(0, operating - fuel);
+                        const int fuel_seconds =
+                            refuel_per_second > 0
+                            ? (missing + refuel_per_second - 1) /
+                                  refuel_per_second
+                            : 0;
+                        item.cooldown_seconds = std::max(
+                            item.cooldown_seconds,
+                            fuel_seconds);
+                        item.ready =
+                            cooldown == 0 && fuel >= operating;
+                    } else {
+                        item.ready = cooldown == 0;
+                    }
                 }
             }
             match_model.respawn_seconds = local == nullptr

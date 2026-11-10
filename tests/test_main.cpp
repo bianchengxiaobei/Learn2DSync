@@ -226,9 +226,10 @@ void test_content_pipeline() {
 
     ContentDatabase database;
     CHECK(database.hero_count() == 10);
-    CHECK(database.weapon_count() == 6);
+    CHECK(database.weapon_count() == 7);
     CHECK(database.find_hero("assault") != nullptr);
     CHECK(database.find_weapon("grenade") != nullptr);
+    CHECK(database.find_weapon("axe") != nullptr);
     CHECK(database.drop_count() >= 1);
     CHECK(database.find_drop("crystal") != nullptr);
     CHECK(database.crystal_rules().deliver_ticks > 0);

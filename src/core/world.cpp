@@ -21,6 +21,11 @@ constexpr Fix32 kPlayerHalfHeight = Fix32::from_ratio(7, 10);
 constexpr Fix32 kAcceleration = Fix32::from_ratio(1, 100);
 constexpr Fix32 kGravityUp = Fix32::from_ratio(1, 142);
 constexpr Fix32 kGravityDown = Fix32::from_ratio(1, 97);
+constexpr Fix32 kGadgetForceToTick = Fix32::from_ratio(13, 1200);
+constexpr Fix32 kGadgetLimitToTick = Fix32::from_ratio(13, 600);
+constexpr Fix32 kGadgetSlowdownPerTick = Fix32::from_ratio(98235, 100000);
+constexpr Fix32 kDashSeed = Fix32::from_ratio(1, 1000);
+constexpr Fix32 kKickstartGravityMultiplier = Fix32::from_ratio(-31, 25);
 constexpr Fix32 kMaxFallSpeed = Fix32::from_ratio(1, 2);
 // The converted border AABBs are 0.12 units thick.  Their top edge is
 // therefore 0.06 above the authored border line, which is flush with
@@ -211,6 +216,7 @@ void World::spawn_player(std::uint8_t slot) {
     player.weapon = static_cast<std::uint8_t>(WeaponType::Rifle);
     player.ammo = weapon_stats(WeaponType::Rifle).magazine;
     player.alive = 1;
+    reset_player_gadgets(player);
     players_.add(id, player);
 }
 
@@ -224,6 +230,18 @@ void equip_hero_default_weapon(Player& player) {
     player.dispersion_ticks = 0;
     player.warmup_timer = 0;
     player.fire_latch = 0;
+}
+
+void reset_player_gadgets(Player& player) {
+    player.gadget_cooldowns.fill(0);
+    player.gadget_active_ticks.fill(0);
+    for (std::size_t slot = 0; slot < kGadgetSlots; ++slot) {
+        const GadgetStats& gadget = hero_gadget_stats(
+            static_cast<HeroType>(player.hero), slot);
+        player.gadget_fuel[slot] = gadget_uses_fuel(gadget.type)
+            ? kJetPackTuning.capacity
+            : Fix32::zero();
+    }
 }
 
 void World::step(const InputFrame& input) {
@@ -563,10 +581,17 @@ void World::update_player(Player& player) {
             --cooldown;
         }
     }
-    for (std::uint16_t& active : player.gadget_active_ticks) {
-        if (active > 0) {
-            --active;
+    for (std::size_t slot = 0; slot < kGadgetSlots; ++slot) {
+        std::uint16_t& active = player.gadget_active_ticks[slot];
+        if (active == 0) {
+            continue;
         }
+        const GadgetStats& gadget = hero_gadget_stats(
+            static_cast<HeroType>(player.hero), slot);
+        if (gadget_uses_fuel(gadget.type)) {
+            continue;
+        }
+        --active;
     }
     if (player.invulnerable_ticks > 0) {
         --player.invulnerable_ticks;
@@ -649,6 +674,7 @@ void World::update_player(Player& player) {
 
     const WeaponStats& stats =
         weapon_stats(static_cast<WeaponType>(player.weapon));
+    const bool melee_weapon = weapon_is_melee(stats.type);
     if (button_down(player.buttons, kButtonWeaponSwitch) &&
         player.stun_ticks == 0 &&
         player.weapon_switch_cooldown == 0) {
@@ -681,11 +707,11 @@ void World::update_player(Player& player) {
             }
         }
     }
-    if (player.reload_timer == 0 && player.ammo == 0 &&
+    if (!melee_weapon && player.reload_timer == 0 && player.ammo == 0 &&
         player.stun_ticks == 0) {
         player.reload_timer = stats.reload_ticks;
     }
-    if (player.stun_ticks == 0 &&
+    if (!melee_weapon && player.stun_ticks == 0 &&
         button_down(player.buttons, kButtonReload) &&
         player.reload_timer == 0 &&
         player.ammo < stats.magazine) {
@@ -710,9 +736,17 @@ void World::update_player(Player& player) {
         if ((player.gadget_latch & latch) == 0U) {
             player.gadget_latch = static_cast<std::uint8_t>(
                 player.gadget_latch | latch);
-            const bool shock_resist = gadget_is_shock_resist(
-                hero_gadget(
-                    static_cast<HeroType>(player.hero), slot));
+            const GadgetStats& gadget = hero_gadget_stats(
+                static_cast<HeroType>(player.hero), slot);
+            const bool shock_resist = gadget_is_shock_resist(gadget.type);
+            if (gadget_uses_fuel(gadget.type) &&
+                player.gadget_active_ticks[slot] > 0) {
+                if (player.gadget_fuel[slot] >
+                    kJetPackTuning.operating_fuel) {
+                    player.gadget_active_ticks[slot] = 0;
+                }
+                continue;
+            }
             if (player.gadget_cooldowns[slot] == 0 &&
                 (player.stun_ticks == 0 || shock_resist)) {
                 activate_gadget(player, slot);
@@ -722,17 +756,107 @@ void World::update_player(Player& player) {
 
     const bool stunned = player.stun_ticks > 0;
     bool magnetic_active = false;
+    bool hyper_dash_active = false;
+    bool kickstart_active = false;
+    bool turbo_active = false;
+    std::size_t turbo_slot = kGadgetSlots;
+    Fix32 dash_accel{};
+    Fix32 turbo_accel{};
+    Fix32 turbo_limit{};
     for (std::size_t slot = 0; slot < kGadgetSlots; ++slot) {
-        if (player.gadget_active_ticks[slot] > 0 &&
-            hero_gadget_stats(
-                static_cast<HeroType>(player.hero), slot).type ==
-                GadgetType::MagneticNozzle) {
+        if (player.gadget_active_ticks[slot] == 0) {
+            continue;
+        }
+        const GadgetStats& active = hero_gadget_stats(
+            static_cast<HeroType>(player.hero), slot);
+        if (active.type == GadgetType::MagneticNozzle) {
             magnetic_active = true;
-            break;
+        } else if (active.type == GadgetType::HyperAccelerator) {
+            hyper_dash_active = true;
+            dash_accel = active.impulse * kGadgetForceToTick;
+        } else if (active.type == GadgetType::Kickstart) {
+            kickstart_active = true;
+            dash_accel = active.impulse * kGadgetForceToTick;
+        } else if (active.type == GadgetType::TurboPack) {
+            turbo_active = true;
+            turbo_slot = slot;
+            turbo_accel = active.impulse * kGadgetForceToTick;
+            turbo_limit = active.speed * kGadgetLimitToTick;
+        }
+    }
+    if (stunned && turbo_active) {
+        player.gadget_active_ticks[turbo_slot] = 0;
+        turbo_active = false;
+    }
+    for (std::size_t slot = 0; slot < kGadgetSlots; ++slot) {
+        const GadgetStats& gadget = hero_gadget_stats(
+            static_cast<HeroType>(player.hero), slot);
+        if (!gadget_uses_fuel(gadget.type)) {
+            continue;
+        }
+        Fix32& fuel = player.gadget_fuel[slot];
+        if (player.gadget_active_ticks[slot] == 0) {
+            fuel = Fix32::min(
+                kJetPackTuning.capacity,
+                fuel + kJetPackTuning.refuel_per_tick);
+        } else {
+            fuel = Fix32::max(
+                Fix32::zero(),
+                fuel - kJetPackTuning.consumption_per_tick);
+            if (fuel <= Fix32::zero()) {
+                player.gadget_active_ticks[slot] = 0;
+            }
         }
     }
     const bool left = button_down(player.buttons, kButtonLeft);
     const bool right = button_down(player.buttons, kButtonRight);
+    const bool up = button_down(player.buttons, kButtonJump);
+    const bool down = button_down(player.buttons, kButtonDown);
+    const std::int32_t heading_x =
+        (right ? 1 : 0) - (left ? 1 : 0);
+    const std::int32_t heading_y =
+        (up ? 1 : 0) - (down ? 1 : 0);
+
+    const bool dash_active = hyper_dash_active || kickstart_active;
+    if (dash_active) {
+        Vec2 direction = player.velocity.normalized();
+        if (direction == Vec2{}) {
+            direction = player.aim.normalized();
+        }
+        if (direction == Vec2{}) {
+            direction = Vec2{
+                Fix32::from_int(player.facing),
+                Fix32::zero()};
+        }
+        player.velocity += direction * dash_accel;
+    } else if (turbo_active) {
+        if (heading_x == 0) {
+            player.velocity.x *= kGadgetSlowdownPerTick;
+        } else if (heading_x > 0) {
+            if (player.velocity.x < turbo_limit) {
+                player.velocity.x = Fix32::min(
+                    player.velocity.x + turbo_accel,
+                    turbo_limit);
+            }
+        } else if (player.velocity.x > -turbo_limit) {
+            player.velocity.x = Fix32::max(
+                player.velocity.x - turbo_accel,
+                -turbo_limit);
+        }
+        if (heading_y == 0) {
+            player.velocity.y *= kGadgetSlowdownPerTick;
+        } else if (heading_y > 0) {
+            if (player.velocity.y > -turbo_limit) {
+                player.velocity.y = Fix32::max(
+                    player.velocity.y - turbo_accel,
+                    -turbo_limit);
+            }
+        } else if (player.velocity.y < turbo_limit) {
+            player.velocity.y = Fix32::min(
+                player.velocity.y + turbo_accel,
+                turbo_limit);
+        }
+    }
     Fix32 target_speed =
         right ? (left ? Fix32::zero() : hero.run_speed)
               : (left ? -hero.run_speed : Fix32::zero());
@@ -745,13 +869,16 @@ void World::update_player(Player& player) {
     if (magnetic_active) {
         target_speed *= Fix32::from_ratio(17, 20);
     }
-    if (target_speed == Fix32::zero()) {
-        player.velocity.x = move_toward(player.velocity.x, Fix32::zero(), kAcceleration);
-    } else {
-        player.velocity.x = move_toward(player.velocity.x, target_speed, kAcceleration);
+    if (!dash_active && !turbo_active) {
+        if (target_speed == Fix32::zero()) {
+            player.velocity.x = move_toward(player.velocity.x, Fix32::zero(), kAcceleration);
+        } else {
+            player.velocity.x = move_toward(player.velocity.x, target_speed, kAcceleration);
+        }
     }
 
-    if (!stunned && button_down(player.buttons, kButtonJump) && player.grounded) {
+    if (!stunned && !dash_active && !turbo_active &&
+        button_down(player.buttons, kButtonJump) && player.grounded) {
         Fix32 jump_speed = hero.jump_speed;
         if (player.slow_ticks > 0) {
             jump_speed *= Fix32::from_ratio(4, 5);
@@ -797,7 +924,20 @@ void World::update_player(Player& player) {
         if (player.pad_boost_ticks == 0) {
             player.pad_boost = 0;
         }
-    } else {
+    } else if (hyper_dash_active) {
+        if (player.grounded != 0) {
+            player.velocity.y = Fix32::min(
+                player.velocity.y +
+                    (player.velocity.y < Fix32::zero()
+                         ? kGravityUp
+                         : kGravityDown),
+                kMaxFallSpeed);
+        }
+    } else if (kickstart_active) {
+        const Fix32 gravity =
+            player.velocity.y < Fix32::zero() ? kGravityUp : kGravityDown;
+        player.velocity.y += gravity * kKickstartGravityMultiplier;
+    } else if (!turbo_active) {
         player.velocity.y = Fix32::min(
             player.velocity.y +
                 (player.velocity.y < Fix32::zero() ? kGravityUp : kGravityDown),
@@ -1006,7 +1146,7 @@ void World::update_player(Player& player) {
         player.fire_cooldown == 0 &&
         player.reload_timer == 0 &&
         player.warmup_timer == 0 &&
-        player.ammo > 0) {
+        (melee_weapon || player.ammo > 0)) {
         fire(player);
     }
 }
@@ -1020,9 +1160,16 @@ void World::activate_gadget(Player& player, std::size_t slot) {
     if (gadget.cooldown_ticks == 0) {
         return;
     }
+    if (gadget_uses_fuel(gadget.type)) {
+        if (player.gadget_active_ticks[slot] > 0 ||
+            player.gadget_fuel[slot] < kJetPackTuning.operating_fuel) {
+            return;
+        }
+    }
     player.gadget_cooldowns[slot] = gadget.cooldown_ticks;
     if (gadget.active_ticks > 0) {
-        player.gadget_active_ticks[slot] = gadget.active_ticks;
+        player.gadget_active_ticks[slot] =
+            gadget_uses_fuel(gadget.type) ? 1 : gadget.active_ticks;
     }
 
     if (gadget_is_projectile(gadget.type)) {
@@ -1046,25 +1193,38 @@ void World::activate_gadget(Player& player, std::size_t slot) {
         case GadgetType::Mutator:
         case GadgetType::Avatar:
             break;
-        case GadgetType::Kickstart:
-            player.velocity.x =
-                Fix32::from_int(player.facing) * gadget.impulse;
-            player.grounded = 0;
+        case GadgetType::Kickstart: {
+            Vec2 direction = player.aim.normalized();
+            if (direction == Vec2{}) {
+                direction = Vec2{
+                    Fix32::from_int(player.facing),
+                    Fix32::zero()};
+            }
+            player.velocity = direction * kDashSeed;
+            if (direction.y < Fix32::zero()) {
+                player.grounded = 0;
+            }
             break;
+        }
         case GadgetType::TurboPack:
-            player.velocity.y = -gadget.impulse;
-            player.velocity.x +=
-                Fix32::from_int(player.facing) *
-                (gadget.impulse * Fix32::from_ratio(1, 2));
+            player.velocity = {};
             player.grounded = 0;
             break;
-        case GadgetType::HyperAccelerator:
-            player.velocity.x =
-                Fix32::from_int(player.facing) * gadget.impulse;
-            player.grounded = 0;
+        case GadgetType::HyperAccelerator: {
+            Vec2 direction = player.aim.normalized();
+            if (direction == Vec2{}) {
+                direction = Vec2{
+                    Fix32::from_int(player.facing),
+                    Fix32::zero()};
+            }
+            player.velocity = direction * kDashSeed;
+            if (direction.y < Fix32::zero()) {
+                player.grounded = 0;
+            }
             player.invulnerable_ticks = std::max<std::uint16_t>(
                 player.invulnerable_ticks, 60);
             break;
+        }
         case GadgetType::Dematerializator:
             player.invulnerable_ticks = std::max(
                 player.invulnerable_ticks, gadget.active_ticks);
@@ -1087,14 +1247,34 @@ void World::activate_gadget(Player& player, std::size_t slot) {
 }
 
 void World::melee_attack(Player& player, const GadgetStats& gadget) {
-    const Fix32 reach = gadget.radius;
+    melee_strike(
+        player,
+        gadget.radius,
+        gadget.damage,
+        Fix32::zero());
+}
+
+void World::melee_strike(
+    Player& player,
+    Fix32 reach,
+    std::uint16_t damage,
+    Fix32 critical_ratio) {
+    const Fix32 scaled =
+        Fix32::from_int(damage) * (Fix32::one() + critical_ratio);
+    const std::int32_t rounded = scaled.to_int_round();
+    if (rounded <= 0) {
+        return;
+    }
+    const std::uint16_t strike_damage = static_cast<std::uint16_t>(
+        std::min<std::int32_t>(rounded, 65535));
+    const Fix32 reach_sq = reach * reach;
     players_.for_each([&](Player& target) {
         if (!target.alive || target.team == player.team ||
             target.id == player.id) {
             return;
         }
         const Vec2 delta = target.position - player.position;
-        if (delta.length_sq() > reach * reach) {
+        if (delta.length_sq() > reach_sq) {
             return;
         }
         const Vec2 direction = delta.normalized();
@@ -1102,7 +1282,7 @@ void World::melee_attack(Player& player, const GadgetStats& gadget) {
             direction.dot(player.aim) < Fix32::from_ratio(1, 2)) {
             return;
         }
-        apply_damage(target, gadget.damage, player.id);
+        apply_damage(target, strike_damage, player.id);
     });
 }
 
@@ -1310,6 +1490,20 @@ void World::fire(Player& player) {
              (Fix32::one() +
               Fix32::from_ratio(damage_bonus_percent, 100)))
                 .to_int_round());
+    }
+
+    if (weapon_is_melee(stats.type)) {
+        Fix32 critical_ratio{};
+        if (stats.critical_chance > Fix32::zero()) {
+            const std::int32_t roll =
+                static_cast<std::int32_t>(rng_.bounded(1000));
+            if (Fix32::from_ratio(roll, 1000) < stats.critical_chance) {
+                critical_ratio = stats.critical_ratio;
+            }
+        }
+        melee_strike(player, stats.range, damage, critical_ratio);
+        player.fire_cooldown = stats.fire_interval;
+        return;
     }
 
     const auto rotate_aim = [](Vec2 direction, Fix32 degrees) {

@@ -427,7 +427,7 @@ input.pause=Escape
 |---|---|---|---|
 | Scout | 红宝石之刃：近战 100，12s | 能量电池：短时无敌，15s | 磁力喷嘴：伤害 +60%，12s |
 | Machine Gunner | 破片手雷：爆炸 160，11.5s | 静电护盾：20 + 眩晕，20s | 注射器：约 3s 后回复 250，20s |
-| Assault | 火箭齐射：50 直击 + 25 范围，0.27s | 涡轮背包：垂直喷射，1s | 坚韧：40% 减伤，12s |
+| Assault | 火箭齐射：50 直击 + 25 范围，0.27s | 涡轮背包：开关式 8 向喷射（WASD），5s 燃料（启动需 ≥50），关闭后自动回充 | 坚韧：40% 减伤，12s |
 | Grenadier | 震荡手雷：50 + 眩晕，11.5s | 破片地雷：爆炸 160，15s | 中和器：清除负面，10s |
 | Cyborg | 回旋镖：80，19s | 陷阱：定身，10s | 双发系统：伤害 +40%，12s |
 | Hermit | 喷洒器：50，15s | 化学物：中毒/减速，20s | 放血者：伤害 +35%，1.5s |
@@ -473,7 +473,7 @@ py -3 scripts\gen_placeholder_sprites.py
 ```powershell
 py -3 scripts\import_original_heroes.py `
   --assets-root <导出的资源目录> `
-  --sprite-root assets\sprites `
+  --sprite-root reference\onraid\extracted\sprites `
   --out-dir assets\generated\original_heroes `
   --rig-out assets\data\hero_rigs.json
 ```

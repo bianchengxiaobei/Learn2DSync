@@ -54,6 +54,9 @@ void write_player(ByteWriter& writer, const Player& player) {
     for (const std::uint16_t active : player.gadget_active_ticks) {
         writer.u16(active);
     }
+    for (const Fix32 fuel : player.gadget_fuel) {
+        writer.u32(static_cast<std::uint32_t>(fuel.raw()));
+    }
     writer.u16(player.invulnerable_ticks);
     writer.u16(player.heal_ticks);
     writer.u16(player.heal_interval);
@@ -100,6 +103,7 @@ void write_player(ByteWriter& writer, const Player& player) {
 bool read_player(ByteReader& reader, Player& player, std::string* error) {
     std::uint32_t health = 0;
     std::uint32_t damage_bonus = 0;
+    std::array<std::uint32_t, kGadgetSlots> gadget_fuel{};
     if (!read_entity(reader, player.id) ||
         !read_vec2(reader, player.position) ||
         !read_vec2(reader, player.velocity) ||
@@ -112,6 +116,9 @@ bool read_player(ByteReader& reader, Player& player, std::string* error) {
         !reader.u16(player.gadget_active_ticks[0]) ||
         !reader.u16(player.gadget_active_ticks[1]) ||
         !reader.u16(player.gadget_active_ticks[2]) ||
+        !reader.u32(gadget_fuel[0]) ||
+        !reader.u32(gadget_fuel[1]) ||
+        !reader.u32(gadget_fuel[2]) ||
         !reader.u16(player.invulnerable_ticks) ||
         !reader.u16(player.heal_ticks) ||
         !reader.u16(player.heal_interval) ||
@@ -161,6 +168,10 @@ bool read_player(ByteReader& reader, Player& player, std::string* error) {
     player.health = Fix32::from_raw(static_cast<std::int32_t>(health));
     player.damage_bonus =
         Fix32::from_raw(static_cast<std::int32_t>(damage_bonus));
+    for (std::size_t slot = 0; slot < kGadgetSlots; ++slot) {
+        player.gadget_fuel[slot] = Fix32::from_raw(
+            static_cast<std::int32_t>(gadget_fuel[slot]));
+    }
     if (!player.id.valid() || player.team > 1 || player.weapon >= content().weapon_count() ||
         player.hero >= content().hero_count() || player.bot > 1 || player.alive > 1 ||
         player.grounded > 1 || player.drop_through_ticks > 3 ||
@@ -185,6 +196,20 @@ bool read_player(ByteReader& reader, Player& player, std::string* error) {
             *error = "invalid player snapshot fields";
         }
         return false;
+    }
+    for (std::size_t slot = 0; slot < kGadgetSlots; ++slot) {
+        const GadgetStats& gadget = hero_gadget_stats(
+            static_cast<HeroType>(player.hero), slot);
+        const Fix32 max_fuel = gadget_uses_fuel(gadget.type)
+            ? kJetPackTuning.capacity
+            : Fix32::zero();
+        if (player.gadget_fuel[slot] < Fix32::zero() ||
+            player.gadget_fuel[slot] > max_fuel) {
+            if (error) {
+                *error = "invalid player gadget fuel";
+            }
+            return false;
+        }
     }
     return true;
 }

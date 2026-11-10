@@ -245,6 +245,9 @@ bool GameUi::initialize(
     }
     hud_weapon_ = find("hud-weapon");
     hud_ammo_ = find("hud-ammo");
+    hud_melee_ = find("hud-melee");
+    hud_melee_fill_ = find("hud-melee-fill");
+    hud_melee_state_ = find("hud-melee-state");
     hud_vitals_ = find("hud-vitals");
     hud_buff_ = find("hud-buff");
     hud_death_ = find("hud-death");
@@ -300,6 +303,8 @@ bool GameUi::initialize(
         hud_shield_fill_ == nullptr || hud_shield_text_ == nullptr ||
         hud_gadget_names_[0] == nullptr || hud_gadget_names_[1] == nullptr ||
         hud_gadget_names_[2] == nullptr ||
+        hud_melee_ == nullptr || hud_melee_fill_ == nullptr ||
+        hud_melee_state_ == nullptr ||
         scoreboard_ == nullptr || results_title_ == nullptr ||
         settings_tab_game_ == nullptr ||
         settings_tab_controls_ == nullptr ||
@@ -317,6 +322,7 @@ bool GameUi::initialize(
     set_visible(lobby_countdown_, false);
     set_visible(hud_objective_, false);
     set_visible(hud_notice_, false);
+    set_visible(hud_melee_, false);
     set_visible(hud_death_, false);
     set_visible(damage_flash_, false);
     set_visible(scoreboard_, false);
@@ -396,6 +402,9 @@ void GameUi::shutdown() {
     hud_gadget_fills_.fill(nullptr);
     hud_weapon_ = nullptr;
     hud_ammo_ = nullptr;
+    hud_melee_ = nullptr;
+    hud_melee_fill_ = nullptr;
+    hud_melee_state_ = nullptr;
     hud_vitals_ = nullptr;
     hud_buff_ = nullptr;
     hud_death_ = nullptr;
@@ -858,12 +867,39 @@ void GameUi::update_match(const UiMatchModel& model) {
     set_text(
         hud_alive_,
         model.local_alive ? tr("generic.live") : tr("generic.down"));
-    set_text(hud_ammo_, std::to_string(model.local_ammo));
+    set_text(
+        hud_ammo_,
+        model.local_ammo < 0 ? "--" : std::to_string(model.local_ammo));
     set_text(
         hud_weapon_,
         localization_.text_or(
             "weapon." + model.weapon_name,
             uppercase(model.weapon_name)));
+    const bool show_melee = model.local_melee && model.local_alive;
+    set_visible(hud_melee_, show_melee);
+    if (show_melee) {
+        if (hud_melee_fill_ != nullptr) {
+            hud_melee_fill_->SetProperty(
+                "width",
+                std::to_string(model.local_melee_percent) + "%");
+        }
+        const bool ready = model.local_melee_tenths <= 0;
+        if (hud_melee_ != nullptr) {
+            hud_melee_->SetClass("ready", ready);
+            hud_melee_->SetClass("cooling", !ready);
+        }
+        if (hud_melee_state_ != nullptr) {
+            if (ready) {
+                set_text(hud_melee_state_, tr("generic.ready"));
+            } else {
+                set_text(
+                    hud_melee_state_,
+                    std::to_string(model.local_melee_tenths / 10) + "." +
+                        std::to_string(model.local_melee_tenths % 10) +
+                        "S");
+            }
+        }
+    }
     for (std::size_t slot = 0; slot < model.gadgets.size(); ++slot) {
         const UiGadgetSlot& gadget = model.gadgets[slot];
         const bool ready =
@@ -891,9 +927,11 @@ void GameUi::update_match(const UiMatchModel& model) {
         }
         Rml::Element* fill = hud_gadget_fills_[slot];
         if (fill != nullptr) {
-            const int width = gadget.active || gadget.ready
-                ? 100
-                : gadget.cooldown_percent;
+            const int width = gadget.fuel_gadget
+                ? gadget.cooldown_percent
+                : (gadget.active || gadget.ready
+                    ? 100
+                    : gadget.cooldown_percent);
             fill->SetProperty("width", std::to_string(width) + "%");
         }
     }

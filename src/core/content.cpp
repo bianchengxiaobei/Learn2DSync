@@ -1204,16 +1204,21 @@ private:
             if (weapon.id.empty() || weapon.id.size() > kMaxContentIdLength) {
                 return fail("weapon id is invalid");
             }
-            if (weapon.magazine == 0 || weapon.magazine > 512 ||
+            if (weapon.magazine > 512 ||
+                (weapon.magazine == 0 && !weapon_is_melee(weapon.type)) ||
                 weapon.fire_interval == 0 || weapon.reload_ticks > 6000 ||
                 weapon.reload_size > weapon.magazine ||
                 weapon.warmup_ticks > 6000 ||
                 weapon.damage > 2000 || weapon.pellets == 0 ||
-                weapon.pellets > 32 || weapon.projectile_life == 0 ||
+                weapon.pellets > 32 ||
+                (weapon.projectile_life == 0 &&
+                 !weapon_is_melee(weapon.type)) ||
                 weapon.projectile_life > 3600 ||
-                weapon.projectile_speed <= Fix32::zero() ||
+                (weapon.projectile_speed <= Fix32::zero() &&
+                 !weapon_is_melee(weapon.type)) ||
                 weapon.spread < Fix32::zero() ||
-                weapon.projectile_half_size <= Fix32::zero() ||
+                (weapon.projectile_half_size <= Fix32::zero() &&
+                 !weapon_is_melee(weapon.type)) ||
                 weapon.range < Fix32::zero() ||
                 weapon.falloff_start < Fix32::zero() ||
                 weapon.falloff_start > Fix32::one() ||
@@ -1523,10 +1528,10 @@ void ContentDatabase::reset_defaults() {
         12,
         Fix32::from_ratio(36, 100),
         Fix32::from_ratio(10605, 10000),
-        "shotgun",
+        "axe",
     };
 
-    weapon_count_ = 6;
+    weapon_count_ = 7;
     weapons_[0] = WeaponStats{
         .type = WeaponType::Rifle,
         .id = "rifle",
@@ -1706,6 +1711,37 @@ void ContentDatabase::reset_defaults() {
         .divergence_degrees = Fix32::zero(),
         .dispersion_degrees = Fix32::zero(),
         .dispersion_ticks = 0,
+    };
+
+    weapons_[6] = WeaponStats{
+        .type = WeaponType::Axe,
+        .id = "axe",
+        .magazine = 0,
+        .fire_interval = 84,
+        .reload_ticks = 0,
+        .reload_size = 0,
+        .warmup_ticks = 0,
+        .damage = 65,
+        .pellets = 1,
+        .projectile_life = 0,
+        .projectile_speed = Fix32::zero(),
+        .spread = Fix32::zero(),
+        .projectile_half_size = Fix32::zero(),
+        .range = Fix32::from_ratio(135, 100),
+        .falloff_start = Fix32::one(),
+        .falloff_end = Fix32::one(),
+        .explosion_radius = Fix32::zero(),
+        .explosion_damage = 0,
+        .explosive = 0,
+        .platform_puncher = 1,
+        .joint_x = Fix32::zero(),
+        .joint_y = Fix32::zero(),
+        .gun_x = Fix32::from_ratio(4, 5),
+        .gun_y = Fix32::zero(),
+        .divergence_degrees = Fix32::zero(),
+        .dispersion_degrees = Fix32::zero(),
+        .dispersion_ticks = 0,
+        .wall_shot_action = WallShotAction::Ignore,
     };
 
     weapons_[2].explode_on_expire = 1;

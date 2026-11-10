@@ -12,6 +12,15 @@ namespace nsync::core {
 
 inline constexpr std::size_t kGadgetSlots = 3;
 
+struct JetPackTuning {
+    Fix32 capacity = Fix32::from_int(300);
+    Fix32 consumption_per_tick = Fix32::one();
+    Fix32 refuel_per_tick = Fix32::from_ratio(1, 2);
+    Fix32 operating_fuel = Fix32::from_int(50);
+};
+
+inline constexpr JetPackTuning kJetPackTuning{};
+
 enum class GadgetType : std::uint8_t {
     RubyBlade = 0,
     PowerBattery,
@@ -221,7 +230,7 @@ inline constexpr GadgetStats kGadgetStats[] = {
         0,
         Fix32::zero(),
         Fix32::zero(),
-        Fix32::from_ratio(9, 10),
+        Fix32::from_ratio(9, 5),
     },
     {
         GadgetType::RocketLaunch,
@@ -315,15 +324,15 @@ inline constexpr GadgetStats kGadgetStats[] = {
         "TURBO PACK",
         "涡轮背包",
         60,
-        0,
+        60,
         0,
         0,
         0,
         0,
         0,
         Fix32::zero(),
-        Fix32::zero(),
-        Fix32::from_ratio(7, 5),
+        Fix32::from_int(4),
+        Fix32::from_int(4),
     },
     {
         GadgetType::Toughness,
@@ -698,6 +707,10 @@ inline constexpr std::array<std::array<GadgetType, kGadgetSlots>, 10>
 [[nodiscard]] constexpr bool gadget_is_shock_resist(GadgetType type) {
     return type == GadgetType::Neutralizer ||
            type == GadgetType::Inhibitor;
+}
+
+[[nodiscard]] constexpr bool gadget_uses_fuel(GadgetType type) {
+    return type == GadgetType::TurboPack;
 }
 
 [[nodiscard]] constexpr bool gadget_is_projectile(GadgetType type) {

@@ -178,7 +178,7 @@
       "ability_duration": 12,
       "ability_power": 0.36,
       "surface_area": 1.0605,
-      "weapon": "shotgun"
+      "weapon": "axe"
     }
   ],
   "weapons": [
@@ -337,6 +337,26 @@
       "impulse_falloff_start": 0.5,
       "impulse_falloff_end": 0.3,
       "explosive": 1
+    },
+    {
+      "id": "axe",
+      "magazine": 0,
+      "fire_interval": 84,
+      "reload_ticks": 0,
+      "damage": 65,
+      "pellets": 1,
+      "projectile_life": 0,
+      "projectile_speed": 0,
+      "spread": 0,
+      "projectile_half_size": 0,
+      "range": 1.35,
+      "platform_puncher": 1,
+      "joint": [0, 0],
+      "gun": [0.8, 0],
+      "wall_shot_action": "ignore",
+      "explosion_radius": 0,
+      "explosion_damage": 0,
+      "explosive": 0
     }
   ]
 }

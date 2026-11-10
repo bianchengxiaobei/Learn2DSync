@@ -111,6 +111,7 @@ void trace_snapshot_diff(
             (local.reload_timer != remote->reload_timer) ? 1 : 0,
             (local.gadget_cooldowns != remote->gadget_cooldowns ||
              local.gadget_active_ticks != remote->gadget_active_ticks ||
+             local.gadget_fuel != remote->gadget_fuel ||
              local.damage_dealt != remote->damage_dealt ||
              local.respawn_timer != remote->respawn_timer ||
              local.weapon_switch_cooldown != remote->weapon_switch_cooldown ||

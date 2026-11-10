@@ -179,6 +179,10 @@ private:
         bool last_alive = false;
         float hurt_seconds = 0.0f;
         float shoot_seconds = 0.0f;
+        float melee_seconds = 0.0f;
+        float melee_duration = 0.55f;
+        std::uint8_t melee_variant = 0;
+        bool melee_effect_spawned = false;
         float state_seconds = 0.0f;
         float shock_seconds = 0.0f;
         float shock_accum = 0.0f;
